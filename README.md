@@ -1,162 +1,188 @@
-# 🛡️ FinShield
-
+# FINSHIELD
 ### AI-Powered Financial Fraud Defense Network
+> **Tagline**: *“Detect. Understand. Expose.”*
 
-> Detect the transaction. Understand the intent. Expose the network.
-
-FinShield is a prototype financial fraud detection system that goes beyond
-individual transaction analysis.
-
-It combines behavioral risk analysis with graph-based fraud network detection
-to identify suspicious transactions, uncover connected accounts, and generate
-explainable alerts.
+[![Hackathon MVP](https://img.shields.io/badge/Prototype-20--Hour%20Hackathon%20MVP-cyan)](#)
+[![Stack](https://img.shields.io/badge/Stack-React%20%2B%20FastAPI%20%2B%20Cytoscape.js-indigo)](#)
+[![Data](https://img.shields.io/badge/Data-100%25%20Synthetic-emerald)](#)
+[![API Keys](https://img.shields.io/badge/External%20Keys-Zero%20Required-rose)](#)
 
 ---
 
-## 🚨 Problem
+## 1. Problem Statement
 
-Modern financial fraud can involve:
+Financial fraud in the digital banking and instant payment era has evolved beyond isolated stolen cards. Modern fraud operations are carried out by **organized syndicates** utilizing:
+- **Account Takeover (ATO)** via credential stuffing and session hijacking.
+- **Mule Networks**: Layering stolen funds through chains of compromised or recruited accounts within minutes.
+- **Rapid Terminal Liquidation**: Routing money into unmonitored cryptocurrency OTC desks and physical ATM networks before traditional batch AML audits flag them.
 
-- Social engineering
-- Unusual transaction behavior
-- New devices or beneficiaries
-- Mule accounts
-- Coordinated fraud networks
-
-A transaction may appear legitimate when viewed individually, while its
-connections reveal a larger fraud pattern.
+Conventional fraud systems suffer from **siloed transaction rules** that fail to spot multi-hop laundering topologies and produce black-box flags that overwhelm fraud analysts.
 
 ---
 
-## 💡 Solution
+## 2. Solution: FinShield
 
-FinShield uses multiple layers of analysis:
+**FinShield** provides a real-time, explainable fraud defense network that bridges individual behavioral risk scoring with multi-hop graph topology analysis.
 
-Transaction
-↓
-Behavioral Analysis
-↓
-Risk Engine
-↓
-Graph-Based Network Analysis
-↓
-Risk Fusion
-↓
-Explainable Alert
+### Core Defense Flow
+$$\text{Transaction} \longrightarrow \text{Behavioral Risk Analysis} \longrightarrow \text{Risk Score (0--100)} \longrightarrow \text{Fraud Network Traversal} \longrightarrow \text{Explainable Forensic Alert} \longrightarrow \text{Pause / Verify / Proceed}$$
+
+1. **Detect**: Evaluates telemetry (amounts, devices, beneficiaries, velocity, timing, and network proximity) in under 20ms.
+2. **Understand**: Synthesizes human-readable forensic audit narratives explaining *why* the transfer was flagged against historical baselines.
+3. **Expose**: Employs interactive graph algorithms to illuminate entire mule chains ($\text{Victim} \to \text{Mule}_A \to \text{Mule}_B \to \text{Mule}_C \to \text{Cashout}$).
 
 ---
 
-## ✨ Key Features
+## 3. Key Features
 
-- 🔍 Behavioral transaction risk scoring
-- 🕸️ Fraud network visualization
-- 🚨 Suspicious account detection
-- 🧠 Explainable fraud alerts
-- ⚡ Attack simulation
-- 📊 Investigator dashboard
+### 1. Command Dashboard
+- High-level KPIs: Total Transactions, High-Risk Detections, Suspicious Accounts, Suspicious Money Flow (₹).
+- Risk tier distribution bar (Low, Medium, High, Critical).
+- Active Fraud Networks card with direct graph deep links.
+- Real-time Threat Alerts feed with quick-action triage.
 
----
+### 2. Searchable Transaction Stream
+- High-density audit table filterable by text, risk tier (Low to Critical), and status.
+- One-click inspection of any simulated transaction.
 
-## 🧠 How It Works
+### 3. Deep Transaction Investigation
+- Dynamic radial **Risk Score Gauge (0–100)** with tiered risk badges.
+- **Normal vs. Current Comparison**: Current amount vs. 30-day baseline (e.g. ₹48,000 vs. ₹5,800 average), New Beneficiary (`YES/NO`), New Device (`YES/NO`).
+- Granular factor point breakdown (+25 Unusual Amount, +20 New Beneficiary, etc.).
+- **Explainable AI Narrative**: Deterministic forensic rationale generated from actual signals.
+- **Defense Action Controls**: `[PAUSE TRANSACTION]`, `[STEP-UP VERIFY]`, `[PROCEED / APPROVE]`, `[FREEZE ACCOUNT]`.
 
-### 1. Transaction Analysis
+### 4. Interactive Fraud Network Graph (Cytoscape.js)
+- Visual graph canvas: Accounts as color-coded nodes, directed transactions as weighted edges.
+- Node categorization: Victim (Indigo), Mule (Amber), Cash-Out Hub (Crimson), High Risk (Orange), Regular (Sky).
+- **Mule Chain Highlighting**: Automatic one-click tracing of $\text{Victim} \to \text{Mule}_A \to \text{Mule}_B \to \text{Mule}_C \to \text{Cashout}$.
+- **Node Inspector Drawer**: Live balance, inbound volume, outbound drain, and active connection degree.
+- Layout engine switching: Organic (cose), Concentric, Flow (Breadthfirst).
 
-FinShield analyzes:
+### 5. Prioritized Threat Queue (Alerts)
+- Severity-sorted incident queue (Critical, High, Medium, Low).
+- Pre-packaged response playbooks.
 
-- Transaction amount
-- Transaction frequency
-- Beneficiary history
-- Device changes
-- Transaction timing
-- Behavioral deviation
+### 6. Attack Vector Simulator
+- **Normal Transaction**: Low-risk retail baseline.
+- **Suspicious Transaction**: Intercepts a ₹48,000 transfer (8.3x baseline) with an exact **92/100** risk score.
+- **Account Takeover (ATO)**: Simulates foreign Tor IP access and sudden liquidity drainage.
+- **Coordinated Fraud Ring**: Dynamically injects a 4-hop mule ring, displays `“COORDINATED FRAUD PATTERN DETECTED”`, updates graph topology, and triggers alerts.
 
-### 2. Risk Engine
-
-Signals are combined to produce a risk score from 0–100.
-
-### 3. Graph Analysis
-
-Accounts are represented as nodes and transactions as edges.
-
-This allows the system to identify:
-
-- Suspicious clusters
-- Mule accounts
-- Rapid money movement
-- Connected high-risk accounts
-
-### 4. Explainable Alerts
-
-Instead of only showing a fraud probability, FinShield explains why
-the transaction was flagged.
-
-Example:
-
-Risk Score: 92/100 — HIGH
-
-Reasons:
-- New beneficiary
-- Unusual transaction amount
-- New device
-- Suspicious account connections
+### 7. Integrated 3-Minute Hackathon Demo Guide
+- A built-in floating presenter helper widget with 8 step-by-step clicks and speaker talking points.
 
 ---
 
-## 🛠️ Tech Stack
+## 4. Tech Stack
 
-### Frontend
-- React
-- Tailwind CSS
-- Cytoscape.js
-
-### Backend
-- Python
-- FastAPI
-
-### Data
-- SQLite
-- Synthetic transaction dataset
-
-### Detection
-- Rule-based risk engine
-- Graph analysis
-- Optional anomaly detection
-
-### AI
-- LLM-assisted explanation layer
+- **Frontend**: React 19, Vite 8, Tailwind CSS v4, Lucide React Icons.
+- **Graph Visualization**: Cytoscape.js with force-directed physics and dynamic neighborhood highlighting.
+- **Backend**: Python 3.14, FastAPI, Uvicorn (ASGI), Pydantic v2.
+- **Risk & Graph Engines**: Pure Python modular algorithmic scoring and bounded DFS traversal.
+- **AI Explanation Layer**: Deterministic template engine (zero external API keys required; optional Gemini/OpenAI hooks supported).
+- **Data Layer**: In-memory synthetic banking store with live reset capabilities.
 
 ---
 
-## 📊 Demo
+## 5. Risk Engine Scoring Formula
 
-The prototype demonstrates three scenarios:
+Located in `backend/app/risk_engine.py`:
 
-### 🟢 Normal Transaction
-Low-risk transaction with normal behavior.
+$$\text{Risk Score} = \min\left(100, \sum \text{Weights}\right)$$
 
-### 🟠 Suspicious Transaction
-Unusual amount, beneficiary or device.
+| Signal Factor | Penalty Weight | Criteria |
+| :--- | :---: | :--- |
+| **New Beneficiary** | `+20` | Beneficiary not in sender's trusted list. |
+| **New Device** | `+15` | Unrecognized hardware fingerprint. |
+| **Unusual Amount** | `+25` | Amount $\ge 2.5\times$ historical baseline average. |
+| **Unusual Timing** | `+10` | Off-peak execution window (01:00 to 05:00 hrs). |
+| **High Velocity** | `+15` | Rapid burst transfers ($\ge 2$ in 10 minutes). |
+| **Suspicious Network** | `+30` | Direct edge to known mule or high-risk node ($\ge 65$). |
 
-### 🔴 Coordinated Fraud
-Multiple interconnected accounts forming a suspicious network.
+### Risk Tiers
+- **`0 – 29` LOW**: Benign. Routine processing.
+- **`30 – 59` MEDIUM**: Soft monitor. Analyst review queue.
+- **`60 – 79` HIGH**: High probability. Mandatory biometric/OTP step-up challenge.
+- **`80 – 100` CRITICAL**: Acute threat. Instant pause and downstream route quarantine.
+
+---
+
+## 6. Graph Analysis Engine
+
+Located in `backend/app/graph_engine.py`:
+- Detects sequential multi-hop laundering chains:
+  $$\text{Victim Account} \xrightarrow{\Delta t < 5\text{m}} \text{Mule } A \xrightarrow{\Delta t < 5\text{m}} \text{Mule } B \xrightarrow{\Delta t < 5\text{m}} \text{Mule } C \xrightarrow{\text{Terminal}} \text{Crypto OTC / ATM}$$
+- Computes account in/out velocity ratios to identify layering conduits.
+- Isolates connected high-risk subgraphs within 2-hop neighborhoods.
 
 ---
 
-## ⚠️ Disclaimer
+## 7. Setup & Running Locally
 
-This project is a hackathon prototype using synthetic/demo financial data.
-It is not connected to real banking systems and should not be used for
-actual financial decision-making.
+### Prerequisites
+- Python 3.10+ (Tested on Python 3.14)
+- Node.js 18+ and npm
+
+### 1. Clone & Backend Setup
+```bash
+# Navigate to project directory
+cd FinShield
+
+# Install backend dependencies
+python -m pip install -r backend/requirements.txt
+
+# Run backend API server (runs on http://127.0.0.1:8000)
+python backend/run.py
+```
+
+### 2. Frontend Setup
+```bash
+# In a new terminal window:
+cd FinShield/frontend
+
+# Install frontend dependencies
+npm.cmd install
+
+# Start Vite dev server (runs on http://localhost:5173)
+npm.cmd run dev
+```
+
+Open your browser at **`http://localhost:5173`**.
 
 ---
 
-## 🚀 Future Scope
+## 8. 3-Minute Hackathon Demo Flow
 
-- Real-time transaction monitoring
-- UPI ecosystem integration
-- Device intelligence
-- Advanced anomaly detection
-- Privacy-preserving analytics
-- Cross-network fraud intelligence
+Follow this exact sequence (or use the built-in floating **"3-Min Hackathon Demo Guide"** at the bottom-right of the screen):
+
+1. **Dashboard**: Highlight total transactions, risk distribution, and synthetic data label.
+2. **Open Simulator**: Navigate to the Attack Simulator view.
+3. **Trigger Suspicious Transaction**: Click *"Trigger Scenario"* on **Suspicious Transaction**.
+4. **Show 92/100 Risk & Reasons**: Click *"Investigate Transaction"* to show:
+   - ₹48,000 vs normal ₹5,800 (8.3x baseline).
+   - New beneficiary (`YES`), New device (`YES`), Suspicious connection (`YES`).
+   - Risk score: **92/100 — CRITICAL**.
+   - Plain-English forensic explanation.
+5. **Investigate Network**: Click *"Inspect Graph"* to transition to Cytoscape.
+6. **Show Mule Chain**: Click *"Chain #1"* to highlight $\text{Victim} \to \text{Mule A} \to \text{Mule B} \to \text{Mule C} \to \text{Cashout}$. Click any node to inspect in/out balance metrics.
+7. **Trigger Coordinated Fraud Ring**: Return to Simulator, trigger *"Coordinated Fraud Ring"*.
+8. **Show Coordinated Banner & Defense Interventions**: Display `“COORDINATED FRAUD PATTERN DETECTED”`, view updated expanded graph, and execute `[PAUSE]` or `[FREEZE ACCOUNT]`.
+
+*(Full script with talking points available in [`docs/demo.md`](docs/demo.md)).*
 
 ---
+
+## 9. Future Scope
+
+- **Graph Neural Networks (GNNs)**: Implement PyTorch Geometric / GraphSAGE models for dynamic representation learning on subgraphs.
+- **Biometric Device Telemetry**: Incorporate behavioral biometrics (keystroke dynamics, swipe angles).
+- **Federated Consortium Defense**: Zero-knowledge cross-bank mule intelligence sharing without revealing customer PII.
+- **Automated ISO 20022 Interceptor**: Native middleware hooks for real-time ISO 20022 `pacs.008` message enrichment.
+
+---
+
+## 10. Disclaimer
+
+> **HACKATHON PROTOTYPE NOTICE**:  
+> FinShield is a hackathon proof-of-concept created strictly for demonstration purposes. **All account names, transaction amounts, device fingerprints, and financial data used in this application are 100% synthetic and computer-generated.** This software does not connect to real bank accounts, UPI rails, or live payment gateways, and makes no claim of production readiness or regulatory compliance.
