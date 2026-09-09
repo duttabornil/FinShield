@@ -4,8 +4,7 @@ Usage:
     python scripts/import_data.py
     python scripts/import_data.py --dataset transactions
 
-DATABASE_URL is loaded from the project .env file or environment. If neither is
-set, it falls back to the credentials documented in docker-compose.yml.
+DATABASE_URL is loaded from the project .env file or environment.
 """
 import argparse
 import csv
@@ -41,6 +40,19 @@ def parse_bool(value: str) -> bool:
     if normalized in {"false", "0", "f"}:
         return False
     raise ValueError(f"invalid boolean value: {value!r}")
+
+
+def resolve_database_url() -> str:
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url
+    fallback = "postgresql+psycopg://localhost:5432/finshield"
+    print(
+        "DATABASE_URL is not set; attempting a passwordless local fallback "
+        f"({fallback}). Set DATABASE_URL in .env for authenticated PostgreSQL setups.",
+        file=sys.stderr,
+    )
+    return fallback
 
 
 def read_rows(name: str):
@@ -165,10 +177,7 @@ def main():
     parser.add_argument("--dataset", choices=["accounts", "transactions", "alerts", "all"], default="all")
     args = parser.parse_args()
     create_engine, _ = required_package()
-    url = os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg://finshield:finshield@localhost:5432/finshield",
-    )
+    url = resolve_database_url()
     engine = create_engine(url)
     with engine.begin() as connection:
         create_schema(connection)
