@@ -167,3 +167,9 @@ Open your browser at **`http://localhost:5173`**.
 
 > **HACKATHON PROTOTYPE NOTICE**:  
 > FinShield is a hackathon proof-of-concept created strictly for demonstration purposes. **All account names, transaction amounts, device fingerprints, and financial data used in this application are 100% synthetic and computer-generated.** This software does not connect to real bank accounts, UPI rails, or live payment gateways, and makes no claim of production readiness or regulatory compliance.
+
+## Integrated Hackathon UI
+
+This build keeps the original React + FastAPI behavior and applies the supplied Stitch-inspired enterprise fintech presentation layer to the app shell and overview dashboard. All overview metrics remain API-driven from the synthetic backend; no hard-coded production claims were introduced.
+
+The interface intentionally labels the environment as synthetic/demo-only. Risk scores are prototype explainable rules and are not presented as a validated banking model.
