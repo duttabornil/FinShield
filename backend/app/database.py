@@ -24,6 +24,7 @@ class Database:
         self.accounts: Dict[str, Account] = {}
         self.transactions: List[Transaction] = []
         self.alerts: List[Alert] = []
+        self._transaction_statuses: Dict[str, TransactionStatus] = {}
         self._postgres_engine = self._create_postgres_engine()
         self.reset()
 
@@ -53,6 +54,7 @@ class Database:
     def reset(self):
         """Resets the dataset to standard initial synthetic state."""
         self.accounts, self.transactions, self.alerts = DataGenerator.generate_initial_dataset()
+        self._transaction_statuses.clear()
 
     def get_dashboard_stats(self) -> DashboardStats:
         if self._postgres_is_available():
@@ -200,8 +202,7 @@ class Database:
             rows = connection.execute(query, params).mappings()
             return [self._postgres_transaction(row) for row in rows]
 
-    @staticmethod
-    def _postgres_transaction(row) -> Transaction:
+    def _postgres_transaction(self, row) -> Transaction:
         transaction_id = str(row["transaction_id"])
         return Transaction(
             id=transaction_id,
@@ -212,12 +213,16 @@ class Database:
             amount=float(row["amount"]),
             timestamp=str(row["event_time"]),
             device="CSV_IMPORT",
-            status=TransactionStatus.PROCESSED,
+            status=self._transaction_statuses.get(transaction_id, TransactionStatus.PROCESSED),
             is_flagged=bool(row["is_fraud"]),
             scenario_tag="postgres_import",
         )
 
     def get_transaction(self, tx_id: str) -> Optional[Transaction]:
+        for transaction in self.transactions:
+            if transaction.id == tx_id:
+                return transaction
+
         if self._postgres_is_available():
             from sqlalchemy import text
             with self._postgres_engine.connect() as connection:
@@ -230,19 +235,20 @@ class Database:
             if row:
                 return self._postgres_transaction(row)
 
-        for t in self.transactions:
-            if t.id == tx_id:
-                return t
         return None
 
     def update_transaction_status(self, tx_id: str, new_status: TransactionStatus) -> Optional[Transaction]:
-        if self._postgres_is_available() and not any(t.id == tx_id for t in self.transactions):
-            return self.get_transaction(tx_id)
-
         for t in self.transactions:
             if t.id == tx_id:
                 t.status = new_status
                 return t
+
+        if self._postgres_is_available():
+            transaction = self.get_transaction(tx_id)
+            if transaction:
+                self._transaction_statuses[tx_id] = new_status
+                transaction.status = new_status
+                return transaction
         return None
 
     def get_account(self, account_id: str) -> Optional[Account]:
