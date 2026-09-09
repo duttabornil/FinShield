@@ -152,28 +152,9 @@ Open your browser at **`http://localhost:5173`**.
 
 ---
 
-## 8. 3-Minute Hackathon Demo Flow
 
-Follow this exact sequence (or use the built-in floating **"3-Min Hackathon Demo Guide"** at the bottom-right of the screen):
 
-1. **Dashboard**: Highlight total transactions, risk distribution, and synthetic data label.
-2. **Open Simulator**: Navigate to the Attack Simulator view.
-3. **Trigger Suspicious Transaction**: Click *"Trigger Scenario"* on **Suspicious Transaction**.
-4. **Show 92/100 Risk & Reasons**: Click *"Investigate Transaction"* to show:
-   - ₹48,000 vs normal ₹5,800 (8.3x baseline).
-   - New beneficiary (`YES`), New device (`YES`), Suspicious connection (`YES`).
-   - Risk score: **92/100 — CRITICAL**.
-   - Plain-English forensic explanation.
-5. **Investigate Network**: Click *"Inspect Graph"* to transition to Cytoscape.
-6. **Show Mule Chain**: Click *"Chain #1"* to highlight $\text{Victim} \to \text{Mule A} \to \text{Mule B} \to \text{Mule C} \to \text{Cashout}$. Click any node to inspect in/out balance metrics.
-7. **Trigger Coordinated Fraud Ring**: Return to Simulator, trigger *"Coordinated Fraud Ring"*.
-8. **Show Coordinated Banner & Defense Interventions**: Display `“COORDINATED FRAUD PATTERN DETECTED”`, view updated expanded graph, and execute `[PAUSE]` or `[FREEZE ACCOUNT]`.
-
-*(Full script with talking points available in [`docs/demo.md`](docs/demo.md)).*
-
----
-
-## 9. Future Scope
+## 8. Future Scope
 
 - **Graph Neural Networks (GNNs)**: Implement PyTorch Geometric / GraphSAGE models for dynamic representation learning on subgraphs.
 - **Biometric Device Telemetry**: Incorporate behavioral biometrics (keystroke dynamics, swipe angles).
@@ -182,7 +163,7 @@ Follow this exact sequence (or use the built-in floating **"3-Min Hackathon Demo
 
 ---
 
-## 10. Disclaimer
+## 9. Disclaimer
 
 > **HACKATHON PROTOTYPE NOTICE**:  
 > FinShield is a hackathon proof-of-concept created strictly for demonstration purposes. **All account names, transaction amounts, device fingerprints, and financial data used in this application are 100% synthetic and computer-generated.** This software does not connect to real bank accounts, UPI rails, or live payment gateways, and makes no claim of production readiness or regulatory compliance.
