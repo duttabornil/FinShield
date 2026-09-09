@@ -1,186 +1,198 @@
-# FINSHIELD
-### AI-Powered Financial Fraud Defense Network
-> **Tagline**: *“Detect. Understand. Expose.”*
+# FinShield
 
-[![Hackathon MVP](https://img.shields.io/badge/Prototype-20--Hour%20Hackathon%20MVP-cyan)](#)
-[![Stack](https://img.shields.io/badge/Stack-React%20%2B%20FastAPI%20%2B%20Cytoscape.js-indigo)](#)
-[![Data](https://img.shields.io/badge/Data-Benchmark%20%2B%20Synthetic-emerald)](#)
-[![API Keys](https://img.shields.io/badge/External%20Keys-Zero%20Required-rose)](#)
+FinShield is an explainable financial-fraud defense console. It combines a
+React/Vite web interface, a FastAPI backend, PostgreSQL-backed transaction
+data, deterministic risk rules, and a graph view for suspicious account
+relationships.
 
----
+The application supports two data paths:
 
-## 1. Problem Statement
+1. **Imported Kaggle data** for the dashboard, transaction stream, alerts, and
+   PostgreSQL network analysis.
+2. **Synthetic simulator scenarios** for the interactive demo actions. Simulator
+   records are intentionally kept separate from the imported dataset.
 
-Financial fraud in the digital banking and instant payment era has evolved beyond isolated stolen cards. Modern fraud operations are carried out by **organized syndicates** utilizing:
-- **Account Takeover (ATO)** via credential stuffing and session hijacking.
-- **Mule Networks**: Layering stolen funds through chains of compromised or recruited accounts within minutes.
-- **Rapid Terminal Liquidation**: Routing money into unmonitored cryptocurrency OTC desks and physical ATM networks before traditional batch AML audits flag them.
+## Features
 
-Conventional fraud systems suffer from **siloed transaction rules** that fail to spot multi-hop laundering topologies and produce black-box flags that overwhelm fraud analysts.
+- PostgreSQL-backed dashboard totals and transaction stream.
+- Chunked, repeatable ingestion of 1.3M+ transactions.
+- Idempotent `ON CONFLICT DO UPDATE` imports for accounts, transactions, and
+  alerts.
+- Progress output every 100,000 transaction rows and per-batch commits.
+- Searchable transaction feed with fraud and status filters.
+- Alert queue and transaction investigation views.
+- Fraud-network visualization using Cytoscape.js.
+- Explainable risk scoring for simulator actions.
+- Account takeover, suspicious transfer, normal transfer, and fraud-ring
+  simulator scenarios.
+- Benchmark fraud model trained from the anonymized credit-card dataset.
 
----
+## Data sources
 
-## 2. Solution: FinShield
+The repository uses two public Kaggle datasets. The files under `data/raw`
+should be treated as public benchmark data, not live customer information.
 
-**FinShield** provides an explainable fraud defense network prototype that combines benchmark ML scoring, behavioral heuristics, and multi-hop graph topology analysis.
+### Transaction network dataset
 
-### Core Defense Flow
-$$\text{Transaction} \longrightarrow \text{Behavioral Risk Analysis} \longrightarrow \text{Risk Score (0--100)} \longrightarrow \text{Fraud Network Traversal} \longrightarrow \text{Explainable Forensic Alert} \longrightarrow \text{Pause / Verify / Proceed}$$
+The account, transaction, and alert files are used for PostgreSQL-backed
+network analysis:
 
-1. **Detect**: Evaluates available telemetry such as amounts, devices, beneficiaries, velocity, timing, and network proximity.
-2. **Understand**: Synthesizes human-readable forensic audit narratives explaining *why* the transfer was flagged against historical baselines.
-3. **Expose**: Employs interactive graph algorithms to illuminate entire mule chains ($\text{Victim} \to \text{Mule}_A \to \text{Mule}_B \to \text{Mule}_C \to \text{Cashout}$).
+- [Fraud Detection Transactions Dataset on Kaggle](https://www.kaggle.com/datasets/samayashar/fraud-detection-transactions-dataset)
 
----
+Files used by FinShield:
 
-## 3. Key Features
+| File | Rows currently imported | Use |
+| --- | ---: | --- |
+| `data/raw/accounts.csv` | 10,000 | Account dimension and fraud labels |
+| `data/raw/transactions.csv` | 1,323,234 | Directed transaction graph and transaction stream |
+| `data/raw/alerts.csv` | 1,719 input rows | Alert import; duplicate `ALERT_ID` values are updated idempotently |
 
-### 1. Command Dashboard
-- High-level KPIs: Total Transactions, High-Risk Detections, Suspicious Accounts, Suspicious Money Flow (₹).
-- Risk tier distribution bar (Low, Medium, High, Critical).
-- Active Fraud Networks card with direct graph deep links.
-- Real-time Threat Alerts feed with quick-action triage.
+The supplied transaction timestamps are elapsed-time values, not calendar
+timestamps. Account names, devices, beneficiary lists, and banking identities
+are not inferred from these files.
 
-### 2. Searchable Transaction Stream
-- High-density audit table filterable by text, risk tier (Low to Critical), and status.
-- One-click inspection of any simulated transaction.
+### Credit-card benchmark dataset
 
-### 3. Deep Transaction Investigation
-- Dynamic radial **Risk Score Gauge (0–100)** with tiered risk badges.
-- **Normal vs. Current Comparison**: Current amount vs. 30-day baseline (e.g. ₹48,000 vs. ₹5,800 average), New Beneficiary (`YES/NO`), New Device (`YES/NO`).
-- Granular factor point breakdown (+25 Unusual Amount, +20 New Beneficiary, etc.).
-- **Explainable AI Narrative**: Deterministic forensic rationale generated from actual signals.
-- **Defense Action Controls**: `[PAUSE TRANSACTION]`, `[STEP-UP VERIFY]`, `[PROCEED / APPROVE]`, `[FREEZE ACCOUNT]`.
+- [Credit Card Fraud Detection on Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud)
 
-### 4. Interactive Fraud Network Graph (Cytoscape.js)
-- Visual graph canvas: Accounts as color-coded nodes, directed transactions as weighted edges.
-- Node categorization: Victim (Indigo), Mule (Amber), Cash-Out Hub (Crimson), High Risk (Orange), Regular (Sky).
-- **Mule Chain Highlighting**: Automatic one-click tracing of $\text{Victim} \to \text{Mule}_A \to \text{Mule}_B \to \text{Mule}_C \to \text{Cashout}$.
-- **Node Inspector Drawer**: Live balance, inbound volume, outbound drain, and active connection degree.
-- Layout engine switching: Organic (cose), Concentric, Flow (Breadthfirst).
+`data/raw/creditcard.csv` contains 284,807 anonymized rows with `Time`,
+`V1`-`V28`, `Amount`, and `Class`. It is used only for the benchmark ML model;
+it does not contain sender/receiver relationships for the network graph.
 
-### 5. Prioritized Threat Queue (Alerts)
-- Severity-sorted incident queue (Critical, High, Medium, Low).
-- Pre-packaged response playbooks.
+## Architecture
 
-### 6. Attack Vector Simulator
-- **Normal Transaction**: Low-risk retail baseline.
-- **Suspicious Transaction**: Intercepts a ₹48,000 transfer (8.3x baseline) with an exact **92/100** risk score.
-- **Account Takeover (ATO)**: Simulates foreign Tor IP access and sudden liquidity drainage.
-- **Coordinated Fraud Ring**: Dynamically injects a 4-hop mule ring, displays `“COORDINATED FRAUD PATTERN DETECTED”`, updates graph topology, and triggers alerts.
+```text
+React + Vite frontend
+          |
+          | /api through Vite proxy
+          v
+FastAPI backend
+          |
+          +--> PostgreSQL imported dataset
+          |      accounts
+          |      transactions
+          |      alerts
+          |
+          +--> In-memory synthetic simulator
+          +--> Risk and graph engines
+          +--> Benchmark ML model
+```
 
-### 7. Integrated 3-Minute Hackathon Demo Guide
-- A built-in floating presenter helper widget with 8 step-by-step clicks and speaker talking points.
+The API automatically uses PostgreSQL when `DATABASE_URL` is configured and
+the imported tables are available. The simulator remains in memory so that
+interactive demo actions do not modify the imported dataset.
 
----
+## Prerequisites
 
-## 4. Tech Stack
+- Python 3.10 or newer
+- Node.js 18 or newer and npm
+- PostgreSQL 16 or newer
+- Docker Desktop is optional; it can be used to run PostgreSQL
 
-- **Frontend**: React 19, Vite 8, Tailwind CSS v4, Lucide React Icons.
-- **Graph Visualization**: Cytoscape.js with force-directed physics and dynamic neighborhood highlighting.
-- **Backend**: Python 3.14, FastAPI, Uvicorn (ASGI), Pydantic v2.
-- **Risk & Graph Engines**: Pure Python modular algorithmic scoring and bounded DFS traversal.
-- **AI Explanation Layer**: Deterministic template engine (zero external API keys required; optional Gemini/OpenAI hooks supported).
-- **Data Layer**: PostgreSQL schema and repeatable imports for supplied datasets, with the original synthetic simulator retained for demo scenarios.
+## Configuration
 
----
+Create or update the project `.env` file:
 
-## 5. Risk Engine Scoring Formula
+```env
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/DB
+```
 
-Located in `backend/app/risk_engine.py`:
+`DATABASE_URL` is required by the importer and is never replaced by a
+hardcoded password fallback. Do not commit real credentials to source control.
 
-$$\text{Risk Score} = \min\left(100, \sum \text{Weights}\right)$$
+## Installation and startup
 
-| Signal Factor | Penalty Weight | Criteria |
-| :--- | :---: | :--- |
-| **New Beneficiary** | `+20` | Beneficiary not in sender's trusted list. |
-| **New Device** | `+15` | Unrecognized hardware fingerprint. |
-| **Unusual Amount** | `+25` | Amount $\ge 2.5\times$ historical baseline average. |
-| **Unusual Timing** | `+10` | Off-peak execution window (01:00 to 05:00 hrs). |
-| **High Velocity** | `+15` | Rapid burst transfers ($\ge 2$ in 10 minutes). |
-| **Suspicious Network** | `+30` | Direct edge to known mule or high-risk node ($\ge 65$). |
+From the repository root:
 
-### Risk Tiers
-- **`0 – 29` LOW**: Benign. Routine processing.
-- **`30 – 59` MEDIUM**: Soft monitor. Analyst review queue.
-- **`60 – 79` HIGH**: High probability. Mandatory biometric/OTP step-up challenge.
-- **`80 – 100` CRITICAL**: Acute threat. Instant pause and downstream route quarantine.
-
----
-
-## 6. Graph Analysis Engine
-
-Located in `backend/app/graph_engine.py`:
-- Detects sequential multi-hop laundering chains:
-  $$\text{Victim Account} \xrightarrow{\Delta t < 5\text{m}} \text{Mule } A \xrightarrow{\Delta t < 5\text{m}} \text{Mule } B \xrightarrow{\Delta t < 5\text{m}} \text{Mule } C \xrightarrow{\text{Terminal}} \text{Crypto OTC / ATM}$$
-- Computes account in/out velocity ratios to identify layering conduits.
-- Isolates connected high-risk subgraphs within 2-hop neighborhoods.
-
----
-
-## 7. Setup & Running Locally
-
-### Prerequisites
-- Python 3.10+ (Tested on Python 3.14)
-- Node.js 18+ and npm
-
-### 1. Clone & Backend Setup
-```bash
-# Navigate to project directory
-cd FinShield
-
+```powershell
 # Install backend dependencies
 python -m pip install -r backend/requirements.txt
 
-# Start local PostgreSQL
+# Optional: start PostgreSQL with Docker
 docker compose up -d db
 
-# Import the supplied account, network, and alert files
-python scripts/import_data.py
+# Import all Kaggle-derived CSV datasets
+python scripts/import_data.py --dataset all
 
-# Train the benchmark baseline and write actual metrics
+# Optional: train the benchmark model
 python ml/train.py --data data/raw/creditcard.csv
+```
 
-# Run backend API server (runs on http://127.0.0.1:8000)
+Start the backend in one terminal:
+
+```powershell
 python backend/run.py
 ```
 
-### 2. Frontend Setup
-```bash
-# In a new terminal window:
-cd FinShield/frontend
+Start the frontend in another terminal:
 
-# Install frontend dependencies
-npm.cmd install
-
-# Start Vite dev server (runs on http://localhost:5173)
-npm.cmd run dev
+```powershell
+cd frontend
+npm install
+npm run dev
 ```
 
-Open your browser at **`http://localhost:5173`**.
+Open [http://localhost:5173](http://localhost:5173).
 
-`DATABASE_URL` may be set to another PostgreSQL instance. The compose default is `postgresql+psycopg://finshield:finshield@localhost:5432/finshield`. See [docs/DATASETS.md](docs/DATASETS.md) and [docs/MODEL.md](docs/MODEL.md) for data limitations and the evaluation protocol.
+## Bulk importer
 
----
+`scripts/import_data.py` preserves the existing PostgreSQL schema and CSV
+column mappings. It uses SQLAlchemy executemany batches:
 
+- Accounts: 5,000 rows per batch.
+- Transactions: 10,000 rows per batch.
+- Alerts: 5,000 rows per batch.
+- Each batch is committed independently.
+- Existing rows are updated with `ON CONFLICT`, making reruns idempotent.
+- Transaction progress is printed every 100,000 rows.
 
+Run only the transaction import when needed:
 
-## 8. Future Scope
+```powershell
+python scripts/import_data.py --dataset transactions
+```
 
-- **Graph Neural Networks (GNNs)**: Implement PyTorch Geometric / GraphSAGE models for dynamic representation learning on subgraphs.
-- **Biometric Device Telemetry**: Incorporate behavioral biometrics (keystroke dynamics, swipe angles).
-- **Federated Consortium Defense**: Zero-knowledge cross-bank mule intelligence sharing without revealing customer PII.
-- **Automated ISO 20022 Interceptor**: Native middleware hooks for real-time ISO 20022 `pacs.008` message enrichment.
+Verify the imported transaction count:
 
----
+```powershell
+python -c "from sqlalchemy import create_engine,text; import os; from dotenv import load_dotenv; load_dotenv(); e=create_engine(os.environ['DATABASE_URL']); c=e.connect(); print(c.execute(text('SELECT COUNT(*), COUNT(DISTINCT transaction_id) FROM transactions')).one()); c.close()"
+```
 
-## 9. Disclaimer
+The expected current transaction count is **1,323,234**, matching the data
+rows in `data/raw/transactions.csv`.
 
-> **HACKATHON PROTOTYPE NOTICE**:  
-> FinShield is a hackathon proof-of-concept created strictly for demonstration purposes. **All account names, transaction amounts, device fingerprints, and financial data used in this application are 100% synthetic and computer-generated.** This software does not connect to real bank accounts, UPI rails, or live payment gateways, and makes no claim of production readiness or regulatory compliance.
+## API endpoints
 
-## Integrated Hackathon UI
+- `GET /api/dashboard` - PostgreSQL-backed dashboard totals.
+- `GET /api/transactions` - Imported transaction stream with search/filtering.
+- `GET /api/transactions/{id}` - Imported transaction details.
+- `GET /api/alerts` - Imported alerts plus any simulator alerts.
+- `GET /api/network` - Network graph data.
+- `POST /api/simulate/{scenario}` - Run a synthetic demo scenario.
+- `POST /api/reset` - Reset the in-memory simulator state.
 
-This build keeps the original React + FastAPI behavior and applies the supplied Stitch-inspired enterprise fintech presentation layer to the app shell and overview dashboard. All overview metrics remain API-driven from the synthetic backend; no hard-coded production claims were introduced.
+Interactive API documentation is available at
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-The interface intentionally labels the environment as synthetic/demo-only. Risk scores are prototype explainable rules and are not presented as a validated banking model.
+## Important data limitations
+
+- The Kaggle datasets are public/anonymized benchmark data and do not
+  represent real customer accounts.
+- Imported account IDs are numeric and do not contain customer names or device
+  telemetry.
+- Fraud labels and alert rows are dataset labels, not production decisions.
+- The simulator's risk explanations and action controls are demonstration
+  behavior.
+- The frontend displays up to 100 transactions per request; use search and
+  filters to investigate the imported dataset.
+
+## Repository structure
+
+```text
+backend/              FastAPI application and risk/graph engines
+data/raw/             Kaggle-derived CSV files
+docs/                 Dataset and model notes
+frontend/             React/Vite frontend
+ml/                   Benchmark model training and evaluation
+scripts/import_data.py PostgreSQL schema creation and bulk importer
+```

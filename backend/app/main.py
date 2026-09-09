@@ -135,7 +135,7 @@ def get_account_subgraph(account_id: str):
 @app.get("/api/alerts", response_model=List[Alert])
 def get_alerts():
     """Returns all active and resolved fraud defense alerts."""
-    return db.alerts
+    return db.get_alerts()
 
 @app.post("/api/simulate/{scenario}", response_model=SimulationResponse)
 def run_simulation(scenario: str):

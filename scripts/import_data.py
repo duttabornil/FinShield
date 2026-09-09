@@ -9,7 +9,7 @@ DATABASE_URL is loaded from the project .env file or environment.
 import argparse
 import csv
 import os
-import sys
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,19 +40,6 @@ def parse_bool(value: str) -> bool:
     if normalized in {"false", "0", "f"}:
         return False
     raise ValueError(f"invalid boolean value: {value!r}")
-
-
-def resolve_database_url() -> str:
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return url
-    fallback = "postgresql+psycopg://localhost:5432/finshield"
-    print(
-        "DATABASE_URL is not set; attempting a passwordless local fallback "
-        f"({fallback}). Set DATABASE_URL in .env for authenticated PostgreSQL setups.",
-        file=sys.stderr,
-    )
-    return fallback
 
 
 def read_rows(name: str):
@@ -114,7 +101,7 @@ def create_schema(connection):
     connection.execute(text("CREATE INDEX IF NOT EXISTS ix_transactions_time ON transactions(event_time)"))
 
 
-def import_accounts(connection):
+def import_accounts(connection, chunk_size=5000):
     from sqlalchemy import text
     statement = text("""
         INSERT INTO accounts (account_id, customer_id, initial_balance, country, account_type, is_fraud, tx_behavior_id, raw_features)
@@ -124,15 +111,23 @@ def import_accounts(connection):
           tx_behavior_id=EXCLUDED.tx_behavior_id, raw_features=EXCLUDED.raw_features
     """)
     count = 0
+    batch = []
     for row in read_rows("accounts"):
-        connection.execute(statement, {"account_id": row["ACCOUNT_ID"], "customer_id": row["CUSTOMER_ID"],
+        batch.append({"account_id": row["ACCOUNT_ID"], "customer_id": row["CUSTOMER_ID"],
             "initial_balance": float(row["INIT_BALANCE"]), "country": row["COUNTRY"], "account_type": row["ACCOUNT_TYPE"],
             "is_fraud": parse_bool(row["IS_FRAUD"]), "tx_behavior_id": int(row["TX_BEHAVIOR_ID"]), "raw_features": "{}"})
         count += 1
+        if len(batch) >= chunk_size:
+            with connection.begin():
+                connection.execute(statement, batch)
+            batch.clear()
+    if batch:
+        with connection.begin():
+            connection.execute(statement, batch)
     return count
 
 
-def import_transactions(connection, name):
+def import_transactions(connection, name, chunk_size=10000, progress_interval=100000):
     from sqlalchemy import text
     statement = text("""
         INSERT INTO transactions (transaction_id, sender_account_id, receiver_account_id, transaction_type, amount, event_time, is_fraud, alert_id, raw_features)
@@ -142,16 +137,27 @@ def import_transactions(connection, name):
           is_fraud=EXCLUDED.is_fraud, alert_id=EXCLUDED.alert_id, raw_features=EXCLUDED.raw_features
     """)
     count = 0
+    batch = []
     for row in read_rows(name):
-        connection.execute(statement, {"transaction_id": int(row["TX_ID"]), "sender_account_id": row["SENDER_ACCOUNT_ID"],
+        batch.append({"transaction_id": int(row["TX_ID"]), "sender_account_id": row["SENDER_ACCOUNT_ID"],
             "receiver_account_id": row["RECEIVER_ACCOUNT_ID"], "transaction_type": row["TX_TYPE"],
             "amount": float(row["TX_AMOUNT"]), "event_time": float(row["TIMESTAMP"]),
             "is_fraud": parse_bool(row["IS_FRAUD"]), "alert_id": int(row["ALERT_ID"]), "raw_features": "{}"})
         count += 1
+        if len(batch) >= chunk_size:
+            with connection.begin():
+                connection.execute(statement, batch)
+            batch.clear()
+        if count and count % progress_interval == 0:
+            print(f"Imported {count:,} {name} rows")
+    if batch:
+        with connection.begin():
+            connection.execute(statement, batch)
+        print(f"Imported {count:,} {name} rows")
     return count
 
 
-def import_alerts(connection):
+def import_alerts(connection, chunk_size=5000):
     from sqlalchemy import text
     statement = text("""
         INSERT INTO alerts (alert_id, alert_type, is_fraud, transaction_id, sender_account_id, receiver_account_id, transaction_type, amount, event_time, raw_features)
@@ -162,13 +168,21 @@ def import_alerts(connection):
           amount=EXCLUDED.amount, event_time=EXCLUDED.event_time, raw_features=EXCLUDED.raw_features
     """)
     count = 0
+    batch = []
     for row in read_rows("alerts"):
-        connection.execute(statement, {"alert_id": int(row["ALERT_ID"]), "alert_type": row["ALERT_TYPE"],
+        batch.append({"alert_id": int(row["ALERT_ID"]), "alert_type": row["ALERT_TYPE"],
             "is_fraud": parse_bool(row["IS_FRAUD"]), "transaction_id": int(row["TX_ID"]),
             "sender_account_id": row["SENDER_ACCOUNT_ID"], "receiver_account_id": row["RECEIVER_ACCOUNT_ID"],
             "transaction_type": row["TX_TYPE"], "amount": float(row["TX_AMOUNT"]),
             "event_time": float(row["TIMESTAMP"]), "raw_features": "{}"})
         count += 1
+        if len(batch) >= chunk_size:
+            with connection.begin():
+                connection.execute(statement, batch)
+            batch.clear()
+    if batch:
+        with connection.begin():
+            connection.execute(statement, batch)
     return count
 
 
@@ -177,10 +191,17 @@ def main():
     parser.add_argument("--dataset", choices=["accounts", "transactions", "alerts", "all"], default="all")
     args = parser.parse_args()
     create_engine, _ = required_package()
-    url = resolve_database_url()
-    engine = create_engine(url)
-    with engine.begin() as connection:
-        create_schema(connection)
+    url = os.getenv("DATABASE_URL")
+    if not url:
+        raise SystemExit(
+            "DATABASE_URL is required. Set it in the project .env file or environment "
+            "(for example, postgresql+psycopg://USER:PASSWORD@HOST:5432/DB)."
+        )
+    engine = create_engine(url, pool_pre_ping=True)
+    started = time.perf_counter()
+    with engine.connect() as connection:
+        with connection.begin():
+            create_schema(connection)
         counts = {}
         if args.dataset in {"accounts", "all"}:
             counts["accounts"] = import_accounts(connection)
@@ -188,7 +209,9 @@ def main():
             counts["transactions"] = import_transactions(connection, "transactions")
         if args.dataset in {"alerts", "all"}:
             counts["alerts"] = import_alerts(connection)
+    elapsed = time.perf_counter() - started
     print("Imported records:", counts)
+    print(f"Elapsed time: {elapsed:.2f} seconds")
 
 
 if __name__ == "__main__":
