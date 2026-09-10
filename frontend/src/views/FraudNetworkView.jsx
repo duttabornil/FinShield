@@ -1,580 +1,140 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import cytoscape from 'cytoscape';
 import {
-  Share2,
-  ZoomIn,
-  ZoomOut,
-  Maximize2,
-  RotateCcw,
-  ShieldAlert,
-  Users,
-  CreditCard,
   ArrowRight,
-  Info,
-  X,
-  AlertTriangle,
-  Lock,
-  Layers,
-  Sparkles
+  CircleDollarSign,
+  Crosshair,
+  Maximize2,
+  Minus,
+  Network,
+  Plus,
+  RotateCcw,
+  Share2,
+  TriangleAlert,
+  X
 } from 'lucide-react';
 import RiskBadge from '../components/RiskBadge';
 import { fetchNetwork } from '../api/client';
 
-export default function FraudNetworkView({ focusAccountId = null, onInspectTransaction }) {
+const INR = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
+const ROLE_LABELS = { victim: 'Customer / Victim', mule: 'Mule Account', cashout: 'Cash-out / Terminal', high_risk: 'Fraud-linked Account', regular: 'Normal Account' };
+const ROLE_COLORS = { victim: '#6366f1', mule: '#f59e0b', cashout: '#ef4444', high_risk: '#f97316', regular: '#0891b2' };
+const formatMoney = value => INR.format(Number(value || 0));
+const nodeRole = node => ROLE_LABELS[node.category] || node.type?.replaceAll('_', ' ') || 'Account';
+const clusterForNode = (data, id) => (data?.suspicious_clusters || []).find(cluster => cluster.includes(id)) || null;
+
+function hierarchyDepths(nodes, edges) {
+  const incoming = new Map(nodes.map(node => [node.data.id, 0]));
+  edges.forEach(edge => incoming.set(edge.data.target, (incoming.get(edge.data.target) || 0) + 1));
+  const depths = new Map();
+  const queue = nodes.filter(node => !incoming.get(node.data.id)).map(node => [node.data.id, 0]);
+  while (queue.length) {
+    const [id, depth] = queue.shift();
+    if (depth <= (depths.get(id) ?? -1)) continue;
+    depths.set(id, depth);
+    edges.filter(edge => edge.data.source === id).forEach(edge => queue.push([edge.data.target, depth + 1]));
+  }
+  nodes.forEach(node => { if (!depths.has(node.data.id)) depths.set(node.data.id, 0); });
+  return depths;
+}
+
+export default function FraudNetworkView({ focusAccountId = null }) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
-
   const [graphData, setGraphData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [activeMuleChainIdx, setActiveMuleChainIdx] = useState(null);
-  const [filterSuspiciousOnly, setFilterSuspiciousOnly] = useState(false);
-
-  const loadNetworkData = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchNetwork(focusAccountId);
-      setGraphData(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [mode, setMode] = useState('full');
+  const [focusedPath, setFocusedPath] = useState(false);
 
   useEffect(() => {
-    loadNetworkData();
+    let mounted = true;
+    setLoading(true);
+    fetchNetwork(focusAccountId).then(data => mounted && setGraphData(data)).catch(error => console.error(error)).finally(() => mounted && setLoading(false));
+    return () => { mounted = false; };
   }, [focusAccountId]);
 
-  // Initialize Cytoscape when data loads
+  const graph = useMemo(() => {
+    if (!graphData) return null;
+    const suspiciousEdges = graphData.edges.filter(edge => edge.data.is_suspicious);
+    const visibleEdges = mode === 'high-risk' || mode === 'fraud' ? suspiciousEdges : graphData.edges;
+    const visibleIds = new Set(visibleEdges.flatMap(edge => [edge.data.source, edge.data.target]));
+    const visibleNodes = graphData.nodes.filter(node => mode === 'full' || visibleIds.has(node.data.id) || node.data.risk_score >= 60);
+    const nodeIds = new Set(visibleNodes.map(node => node.data.id));
+    const nodes = visibleNodes.map(node => ({ ...node, data: { ...node.data } }));
+    const edges = visibleEdges.filter(edge => nodeIds.has(edge.data.source) && nodeIds.has(edge.data.target));
+    const clusters = (graphData.suspicious_clusters || []).filter(cluster => cluster.some(id => nodeIds.has(id)));
+    const clusterParents = clusters.map((cluster, index) => ({ data: { id: `cluster_${index}`, label: `Suspicious cluster ${String(index + 1).padStart(2, '0')}`, clusterIndex: index } }));
+    nodes.forEach(node => { const index = clusters.findIndex(cluster => cluster.includes(node.data.id)); if (index >= 0) node.data.parent = `cluster_${index}`; });
+    return { nodes: [...clusterParents, ...nodes], edges, clusterMembers: clusters, depths: hierarchyDepths(nodes, edges) };
+  }, [graphData, mode]);
+
   useEffect(() => {
-    if (!containerRef.current || !graphData) return;
-
-    // Filter elements if toggle active
-    let elements = [
-      ...graphData.nodes,
-      ...graphData.edges
-    ];
-
-    if (filterSuspiciousOnly) {
-      const suspNodeIds = new Set();
-      graphData.edges.forEach(e => {
-        if (e.data.is_suspicious) {
-          suspNodeIds.add(e.data.source);
-          suspNodeIds.add(e.data.target);
-        }
-      });
-      elements = [
-        ...graphData.nodes.filter(n => suspNodeIds.has(n.data.id) || n.data.risk_score >= 60),
-        ...graphData.edges.filter(e => e.data.is_suspicious)
-      ];
-    }
-
-    if (cyRef.current) {
-      cyRef.current.destroy();
-    }
-
+    if (!containerRef.current || !graph) return undefined;
+    cyRef.current?.destroy();
     const cy = cytoscape({
       container: containerRef.current,
-      elements: elements,
+      elements: [...graph.nodes, ...graph.edges],
       style: [
-        // Default Node Style
-        {
-          selector: 'node',
-          style: {
-            'label': 'data(label)',
-            'color': '#cbd5e1',
-            'font-family': 'monospace',
-            'font-size': '10px',
-            'font-weight': 'bold',
-            'text-valign': 'bottom',
-            'text-margin-y': 6,
-            'background-color': '#1e293b',
-            'border-width': 2,
-            'border-color': '#475569',
-            'width': 34,
-            'height': 34,
-            'transition-property': 'background-color, border-color, width, height',
-            'transition-duration': '0.3s'
-          }
-        },
-        // Category specific styling
-        {
-          selector: 'node[category = "regular"]',
-          style: {
-            'background-color': '#0369a1',
-            'border-color': '#38bdf8',
-          }
-        },
-        {
-          selector: 'node[category = "victim"]',
-          style: {
-            'background-color': '#4338ca',
-            'border-color': '#818cf8',
-            'border-width': 3,
-          }
-        },
-        {
-          selector: 'node[category = "mule"]',
-          style: {
-            'background-color': '#b45309',
-            'border-color': '#f59e0b',
-            'border-width': 3,
-          }
-        },
-        {
-          selector: 'node[category = "cashout"]',
-          style: {
-            'background-color': '#be123c',
-            'border-color': '#f43f5e',
-            'border-width': 3,
-            'width': 42,
-            'height': 42,
-          }
-        },
-        {
-          selector: 'node[category = "high_risk"]',
-          style: {
-            'background-color': '#c2410c',
-            'border-color': '#fb923c',
-          }
-        },
-        // Selected / Highlighted Node
-        {
-          selector: 'node:selected, node.highlighted',
-          style: {
-            'border-color': '#38bdf8',
-            'border-width': 4,
-            'shadow-blur': 25,
-            'shadow-color': '#38bdf8',
-            'shadow-opacity': 0.8,
-            'width': 46,
-            'height': 46,
-          }
-        },
-        {
-          selector: 'node.mule-chain-active',
-          style: {
-            'border-color': '#f43f5e',
-            'border-width': 4,
-            'shadow-blur': 30,
-            'shadow-color': '#f43f5e',
-            'shadow-opacity': 0.9,
-          }
-        },
-        // Default Edge Style
-        {
-          selector: 'edge',
-          style: {
-            'width': 1.5,
-            'line-color': '#334155',
-            'target-arrow-color': '#475569',
-            'target-arrow-shape': 'triangle',
-            'curve-style': 'bezier',
-            'arrow-scale': 0.9,
-            'opacity': 0.7,
-            'transition-property': 'line-color, width, opacity',
-            'transition-duration': '0.3s'
-          }
-        },
-        // Suspicious Edges
-        {
-          selector: 'edge[?is_suspicious]',
-          style: {
-            'width': 3,
-            'line-color': '#f43f5e',
-            'target-arrow-color': '#f43f5e',
-            'opacity': 0.95,
-            'line-style': 'dashed',
-            'line-dash-pattern': [6, 3]
-          }
-        },
-        {
-          selector: 'edge.highlighted',
-          style: {
-            'width': 4,
-            'line-color': '#38bdf8',
-            'target-arrow-color': '#38bdf8',
-            'opacity': 1,
-            'z-index': 999
-          }
-        },
-        {
-          selector: 'edge.mule-chain-active',
-          style: {
-            'width': 4.5,
-            'line-color': '#f43f5e',
-            'target-arrow-color': '#f43f5e',
-            'opacity': 1,
-            'line-style': 'solid',
-            'z-index': 999
-          }
-        },
-        {
-          selector: '.faded',
-          style: {
-            'opacity': 0.15
-          }
-        }
+        { selector: 'node', style: { label: 'data(label)', color: '#cbd5e1', 'font-family': 'ui-monospace, SFMono-Regular, monospace', 'font-size': 10, 'font-weight': 600, 'text-valign': 'bottom', 'text-margin-y': 7, 'background-color': '#164e63', 'border-width': 2, 'border-color': '#22d3ee', width: 34, height: 34, 'overlay-opacity': 0, 'transition-property': 'opacity, border-color, width, height', 'transition-duration': 250 } },
+        { selector: 'node[category = "victim"]', style: { shape: 'ellipse', 'background-color': '#3730a3', 'border-color': '#818cf8', 'border-width': 3 } },
+        { selector: 'node[category = "mule"]', style: { shape: 'diamond', 'background-color': '#92400e', 'border-color': '#fbbf24', 'border-width': 3 } },
+        { selector: 'node[category = "cashout"]', style: { shape: 'rectangle', 'background-color': '#991b1b', 'border-color': '#fb7185', 'border-width': 3, width: 42, height: 42 } },
+        { selector: 'node[category = "high_risk"]', style: { shape: 'hexagon', 'background-color': '#9a3412', 'border-color': '#fb923c' } },
+        { selector: 'node[category = "regular"]', style: { shape: 'ellipse', 'background-color': '#155e75', 'border-color': '#22d3ee' } },
+        { selector: 'node[clusterIndex]', style: { label: 'data(label)', 'background-color': '#0f172a', 'background-opacity': 0.35, 'border-color': '#334155', 'border-style': 'dashed', 'border-width': 1, color: '#64748b', 'font-size': 9, 'text-valign': 'top', 'text-margin-y': 8, padding: 18, 'compound-sizing-wrt-labels': 'include' } },
+        { selector: 'node:selected, node.highlighted', style: { 'border-color': '#67e8f9', 'border-width': 4, width: 44, height: 44 } },
+        { selector: 'edge', style: { width: 1.5, 'line-color': '#334155', 'target-arrow-color': '#64748b', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'arrow-scale': 0.85, opacity: 0.68, label: 'data(formatted_amount)', color: '#94a3b8', 'font-size': 9, 'text-background-color': '#070b13', 'text-background-opacity': 0.9, 'text-background-padding': 2 } },
+        { selector: 'edge[?is_suspicious]', style: { width: 3, 'line-color': '#f43f5e', 'target-arrow-color': '#f43f5e', opacity: 0.95, 'line-style': 'dashed', 'line-dash-pattern': [6, 3], color: '#fda4af' } },
+        { selector: '.faded', style: { opacity: 0.12 } },
+        { selector: '.path-focus', style: { opacity: 1, width: 4, 'line-color': '#22d3ee', 'target-arrow-color': '#22d3ee', 'line-style': 'solid' } }
       ],
-      layout: {
-        name: 'cose',
-        animate: false,
-        padding: 50,
-        componentSpacing: 100,
-        nodeOverlap: 20,
-        idealEdgeLength: 80,
-      }
+      layout: { name: 'breadthfirst', directed: true, roots: graph.nodes.filter(node => !node.data.parent && !graph.edges.some(edge => edge.data.target === node.data.id)).map(node => node.data.id), spacingFactor: 1.25, padding: 55, animate: false }
     });
-
-    // Node click handler
-    cy.on('tap', 'node', (evt) => {
-      const node = evt.target;
-      const data = node.data();
-      setSelectedNode(data);
-
-      // Highlight 1-hop connected neighbors
-      cy.elements().removeClass('highlighted faded');
+    cy.layout({ name: 'breadthfirst', directed: true, roots: graph.nodes.filter(node => !node.data.parent && !graph.edges.some(edge => edge.data.target === node.data.id)).map(node => node.data.id), spacingFactor: 1.25, padding: 55, animate: false }).run();
+    cy.resize();
+    cy.fit(null, 45);
+    cy.on('tap', 'node[!clusterIndex]', event => {
+      const node = event.target;
+      setSelectedNode(node.data());
       const neighborhood = node.closedNeighborhood();
+      cy.elements().removeClass('highlighted faded path-focus');
       cy.elements().difference(neighborhood).addClass('faded');
       neighborhood.addClass('highlighted');
     });
-
-    // Background click resets highlights
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) {
-        setSelectedNode(null);
-        cy.elements().removeClass('highlighted faded mule-chain-active');
-        setActiveMuleChainIdx(null);
-      }
-    });
-
+    cy.on('tap', event => { if (event.target === cy) { setSelectedNode(null); cy.elements().removeClass('highlighted faded path-focus'); } });
     cyRef.current = cy;
+    return () => cy.destroy();
+  }, [graph]);
 
-    return () => {
-      if (cyRef.current) {
-        cyRef.current.destroy();
-      }
-    };
-  }, [graphData, filterSuspiciousOnly]);
+  const selectedCluster = selectedNode ? clusterForNode(graphData, selectedNode.id) : graphData?.suspicious_clusters?.[0];
+  const selectedClusterSet = new Set(selectedCluster || []);
+  const clusterEdges = graphData?.edges.filter(edge => selectedClusterSet.has(edge.data.source) && selectedClusterSet.has(edge.data.target)) || [];
+  const suspiciousClusterEdges = clusterEdges.filter(edge => edge.data.is_suspicious);
+  const highestRisk = selectedCluster ? graphData.nodes.filter(node => selectedClusterSet.has(node.data.id)).sort((a, b) => b.data.risk_score - a.data.risk_score)[0] : null;
+  const connectedSuspicious = selectedNode ? graphData?.edges.filter(edge => edge.data.is_suspicious && (edge.data.source === selectedNode.id || edge.data.target === selectedNode.id)).length : 0;
 
-  // Layout switcher
-  const runLayout = (name) => {
-    if (!cyRef.current) return;
-    cyRef.current.layout({
-      name: name,
-      animate: true,
-      animationDuration: 500,
-      padding: 50,
-    }).run();
-  };
-
-  // Zoom controls
-  const handleZoomIn = () => cyRef.current && cyRef.current.zoom(cyRef.current.zoom() * 1.25);
-  const handleZoomOut = () => cyRef.current && cyRef.current.zoom(cyRef.current.zoom() * 0.8);
-  const handleFit = () => cyRef.current && cyRef.current.fit(null, 40);
-
-  // Highlight specific detected mule chain
-  const highlightMuleChain = (chain, idx) => {
-    if (!cyRef.current) return;
-    setActiveMuleChainIdx(idx);
-
-    const cy = cyRef.current;
-    cy.elements().removeClass('highlighted faded mule-chain-active');
-
-    // Collect chain nodes & edges
-    const chainSet = new Set(chain);
-    const chainNodes = cy.nodes().filter(n => chainSet.has(n.id()));
-
-    const chainEdges = cy.edges().filter(e => {
-      const s = e.data('source');
-      const t = e.data('target');
-      for (let i = 0; i < chain.length - 1; i++) {
-        if (chain[i] === s && chain[i + 1] === t) return true;
-      }
-      return false;
-    });
-
-    const activeSub = chainNodes.union(chainEdges);
-    cy.elements().difference(activeSub).addClass('faded');
-    activeSub.addClass('mule-chain-active');
-
-    // Fit view to the highlighted chain
-    cy.fit(activeSub, 60);
-
-    // Select first node to show detail
-    if (chain.length > 0) {
-      const firstNode = cy.getElementById(chain[0]);
-      if (firstNode) setSelectedNode(firstNode.data());
-    }
+  const resetView = () => { setMode('full'); setFocusedPath(false); setSelectedNode(null); cyRef.current?.elements().removeClass('highlighted faded path-focus'); cyRef.current?.fit(null, 45); };
+  const focusSelected = () => {
+    if (!selectedNode || !cyRef.current) return;
+    const node = cyRef.current.getElementById(selectedNode.id);
+    if (!node) return;
+    const connected = node.closedNeighborhood();
+    cyRef.current.elements().removeClass('faded path-focus');
+    cyRef.current.elements().difference(connected).addClass('faded');
+    connected.addClass('path-focus');
+    cyRef.current.fit(connected, 65);
+    setFocusedPath(true);
   };
 
   return (
-    <div className="relative h-[calc(100vh-4rem)] flex flex-col overflow-hidden animate-fadeIn">
-      {/* Control Ribbon */}
-      <div className="bg-[#090d16]/90 border-b border-slate-800/80 px-6 py-3 flex flex-wrap items-center justify-between gap-4 z-10 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Share2 className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-sm font-bold font-mono text-white tracking-tight uppercase">
-              Financial Fraud Topology
-            </h2>
-          </div>
-
-          {graphData && (
-            <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-400 border-l border-slate-800 pl-3">
-              <span>{graphData.stats.total_nodes} Accounts</span>
-              <span>•</span>
-              <span>{graphData.stats.total_edges} Transfers</span>
-              <span>•</span>
-              <span className="text-rose-400 font-bold">{graphData.stats.mule_chains_detected} Mule Chains</span>
-            </div>
-          )}
-        </div>
-
-        {/* Legend */}
-        <div className="hidden xl:flex items-center gap-3 text-[11px] font-mono">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-            <span className="text-slate-300">Victim</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-            <span className="text-slate-300">Mule Node</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-            <span className="text-slate-300">Terminal Cash-Out</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-            <span className="text-slate-300">Normal / Merchant</span>
-          </div>
-        </div>
-
-        {/* Actions Toolbar */}
-        <div className="flex items-center gap-2">
-          {/* Filter toggle */}
-          <button
-            onClick={() => setFilterSuspiciousOnly(!filterSuspiciousOnly)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium border transition ${
-              filterSuspiciousOnly
-                ? 'bg-rose-500/20 text-rose-300 border-rose-500/50'
-                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200'
-            }`}
-          >
-            {filterSuspiciousOnly ? 'Showing Suspicious Only' : 'Filter High-Risk'}
-          </button>
-
-          {/* Layout buttons */}
-          <button
-            onClick={() => runLayout('cose')}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-mono"
-            title="Force-Directed Cose Layout"
-          >
-            Organic
-          </button>
-          <button
-            onClick={() => runLayout('concentric')}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-mono"
-            title="Concentric Circles Layout"
-          >
-            Concentric
-          </button>
-          <button
-            onClick={() => runLayout('breadthfirst')}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 text-xs font-mono"
-            title="Flow Hierarchy Layout"
-          >
-            Flow
-          </button>
-
-          <div className="h-4 w-px bg-slate-800" />
-
-          {/* Zoom & Fit */}
-          <button
-            onClick={handleZoomIn}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleZoomOut}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-          <button
-            onClick={handleFit}
-            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800"
-            title="Fit to Screen"
-          >
-            <Maximize2 className="w-4 h-4" />
-          </button>
-        </div>
+    <div className="relative h-[calc(100vh-4rem)] flex flex-col overflow-hidden bg-[#070b13] text-slate-200 animate-fadeIn">
+      <div className="border-b border-slate-800/80 bg-[#090d16]/95 px-5 py-3 flex flex-wrap items-center justify-between gap-3 z-10 backdrop-blur-md">
+        <div className="flex items-center gap-3"><Share2 className="h-5 w-5 text-cyan-400" /><div><h2 className="text-sm font-bold font-mono uppercase tracking-tight text-white">Financial Fraud Topology</h2><p className="text-[10px] font-mono text-slate-500">Trace the network and money flow behind suspicious activity</p></div></div>
+        <div className="flex flex-wrap items-center gap-1.5">{[['full', 'Full Network'], ['fraud', 'Fraud Networks'], ['high-risk', 'High Risk Only']].map(([value, label]) => <button key={value} onClick={() => setMode(value)} className={`px-2.5 py-1.5 rounded-md border text-[11px] font-mono transition ${mode === value ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-300' : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{label}</button>)}<button onClick={() => setMode('full')} className="px-2.5 py-1.5 rounded-md border border-slate-800 bg-slate-900 text-slate-400 text-[11px] font-mono"><CircleDollarSign className="inline h-3.5 w-3.5 mr-1" />Money Flow</button><button onClick={resetView} className="px-2.5 py-1.5 rounded-md border border-slate-800 bg-slate-900 text-slate-400 hover:text-white text-[11px] font-mono"><RotateCcw className="inline h-3.5 w-3.5 mr-1" />Reset View</button></div>
       </div>
-
-      {/* Mule Chain Quick Selection Bar */}
-      {graphData && graphData.mule_chains && graphData.mule_chains.length > 0 && (
-        <div className="bg-slate-950/80 border-b border-slate-800/80 px-6 py-2 flex items-center gap-3 overflow-x-auto z-10">
-          <span className="text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider shrink-0 flex items-center gap-1">
-            <Sparkles className="w-3.5 h-3.5 text-rose-400" />
-            Detected Mule Chains:
-          </span>
-          {graphData.mule_chains.map((chain, idx) => (
-            <button
-              key={idx}
-              onClick={() => highlightMuleChain(chain, idx)}
-              className={`px-2.5 py-1 rounded-md text-xs font-mono font-medium shrink-0 transition flex items-center gap-1.5 border ${
-                activeMuleChainIdx === idx
-                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/60 shadow-sm shadow-rose-950/50'
-                  : 'bg-slate-900/90 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-              }`}
-            >
-              <span>Chain #{idx + 1} ({chain.length} hops)</span>
-              <ArrowRight className="w-3 h-3 text-rose-400" />
-            </button>
-          ))}
-
-          {activeMuleChainIdx !== null && (
-            <button
-              onClick={() => {
-                setActiveMuleChainIdx(null);
-                if (cyRef.current) {
-                  cyRef.current.elements().removeClass('highlighted faded mule-chain-active');
-                  cyRef.current.fit(null, 40);
-                }
-              }}
-              className="text-[11px] font-mono text-cyan-400 hover:underline shrink-0 ml-2"
-            >
-              Clear Highlight
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Main Cytoscape Graph Canvas */}
-      <div className="relative flex-1 bg-[#07090e]">
-        <div ref={containerRef} className="w-full h-full" />
-
-        {loading && (
-          <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center">
-            <div className="flex flex-col items-center gap-2 font-mono text-xs text-slate-400">
-              <div className="w-8 h-8 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-              <span>Rendering Fraud Network Topology...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Node Inspector Side Drawer (When a node is clicked) */}
-        {selectedNode && (
-          <div className="absolute right-4 top-4 bottom-4 w-80 bg-[#0b0f19]/95 border border-slate-700/80 rounded-2xl shadow-2xl p-5 flex flex-col justify-between overflow-y-auto z-20 backdrop-blur-md animate-slideLeft">
-            <div className="space-y-4">
-              {/* Drawer Header */}
-              <div className="flex items-start justify-between pb-3 border-b border-slate-800">
-                <div>
-                  <div className="text-[10px] font-mono text-slate-500 uppercase tracking-widest">
-                    ACCOUNT INSPECTOR
-                  </div>
-                  <h3 className="text-base font-bold font-mono text-white mt-0.5">
-                    {selectedNode.label}
-                  </h3>
-                  <div className="text-xs font-mono text-slate-400">
-                    {selectedNode.id}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setSelectedNode(null)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Risk Badge & Category */}
-              <div className="flex items-center justify-between">
-                <RiskBadge
-                  level={selectedNode.risk_score >= 80 ? 'CRITICAL' : selectedNode.risk_score >= 60 ? 'HIGH' : selectedNode.risk_score >= 30 ? 'MEDIUM' : 'LOW'}
-                  score={selectedNode.risk_score}
-                  size="sm"
-                />
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 uppercase border border-slate-700 font-bold">
-                  {selectedNode.type}
-                </span>
-              </div>
-
-              {/* Financial Metrics */}
-              <div className="space-y-2 font-mono text-xs">
-                <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400">CURRENT BALANCE:</span>
-                  <span className="text-white font-bold">
-                    ₹{(selectedNode.balance || 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400">INCOMING FLOW:</span>
-                  <span className="text-emerald-400 font-bold">
-                    ₹{(selectedNode.total_in || 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400">OUTGOING DRAIN:</span>
-                  <span className="text-rose-400 font-bold">
-                    ₹{(selectedNode.total_out || 0).toLocaleString('en-IN')}
-                  </span>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-900/80 border border-slate-800 flex justify-between items-center">
-                  <span className="text-slate-400">CONNECTED EDGES:</span>
-                  <span className="text-cyan-400 font-bold">
-                    {selectedNode.connections || 0} links
-                  </span>
-                </div>
-              </div>
-
-              {/* Status Note */}
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800/80 text-[11px] font-mono text-slate-400 space-y-1">
-                <div className="flex items-center gap-1.5 text-slate-300 font-bold">
-                  <Info className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>BEHAVIORAL PROFILE</span>
-                </div>
-                <p className="text-slate-400 font-sans leading-relaxed">
-                  {selectedNode.is_mule
-                    ? 'Identified as active layering conduit with high in/out velocity ratios.'
-                    : selectedNode.category === 'victim'
-                    ? 'Legitimate high-balance source exhibiting anomalous sudden drainage.'
-                    : selectedNode.category === 'cashout'
-                    ? 'High-risk exit node (cryptocurrency OTC desk or unmonitored ATM cluster).'
-                    : 'Standard participant account exhibiting routine retail activity.'}
-                </p>
-              </div>
-            </div>
-
-            {/* Quick Actions */}
-            <div className="pt-4 border-t border-slate-800 space-y-2">
-              <button
-                onClick={() => {
-                  if (cyRef.current) {
-                    const node = cyRef.current.getElementById(selectedNode.id);
-                    if (node) {
-                      const neighbors = node.closedNeighborhood();
-                      cyRef.current.fit(neighbors, 60);
-                    }
-                  }
-                }}
-                className="w-full py-2 px-3 rounded-lg text-xs font-mono font-semibold bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-800/60 transition text-center"
-              >
-                Center & Zoom Neighborhood
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <div className="border-b border-slate-800/80 bg-[#0a0f19] px-5 py-2 flex flex-wrap items-center justify-between gap-3 z-10"><div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono text-slate-400">{Object.entries(ROLE_LABELS).map(([key, label]) => <span key={key} className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: ROLE_COLORS[key] }} />{label}</span>)}</div><div className="flex items-center gap-1"><button title="Zoom out" onClick={() => cyRef.current?.zoom(cyRef.current.zoom() * 0.8)} className="p-1.5 border border-slate-800 bg-slate-900 text-slate-400 rounded"><Minus className="h-3.5 w-3.5" /></button><button title="Zoom in" onClick={() => cyRef.current?.zoom(cyRef.current.zoom() * 1.25)} className="p-1.5 border border-slate-800 bg-slate-900 text-slate-400 rounded"><Plus className="h-3.5 w-3.5" /></button><button title="Fit network" onClick={() => cyRef.current?.fit(null, 45)} className="p-1.5 border border-slate-800 bg-slate-900 text-slate-400 rounded"><Maximize2 className="h-3.5 w-3.5" /></button></div></div>
+      <div className="relative flex-1 min-h-0 bg-[radial-gradient(circle_at_50%_20%,rgba(14,116,144,0.09),transparent_48%),linear-gradient(rgba(30,41,59,0.16)_1px,transparent_1px),linear-gradient(90deg,rgba(30,41,59,0.16)_1px,transparent_1px)] bg-[size:auto,32px_32px,32px_32px]"><div ref={containerRef} className="absolute inset-0 h-full w-full" />{loading && <div className="absolute inset-0 flex items-center justify-center bg-[#070b13]/85"><div className="text-center font-mono text-xs text-slate-400"><div className="mx-auto mb-2 h-7 w-7 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent" />Rendering network topology...</div></div>}{graphData && <div className="absolute left-4 top-4 w-64 border border-slate-800/90 bg-[#0b111c]/95 p-3 shadow-xl backdrop-blur-md"><div className="mb-3 flex items-center gap-2 text-[10px] font-mono uppercase tracking-wider text-slate-400"><Network className="h-3.5 w-3.5 text-cyan-400" />Selected network</div><div className="grid grid-cols-2 gap-2 font-mono"><div><span className="block text-[9px] text-slate-500">NETWORK RISK</span><strong className="text-sm text-rose-300">{highestRisk ? (highestRisk.data.risk_score >= 80 ? 'CRITICAL' : highestRisk.data.risk_score >= 60 ? 'HIGH' : 'MEDIUM') : 'N/A'}</strong></div><div><span className="block text-[9px] text-slate-500">ACCOUNTS</span><strong className="text-sm text-white">{selectedCluster?.length || graphData.stats.total_nodes}</strong></div><div><span className="block text-[9px] text-slate-500">CONNECTIONS</span><strong className="text-sm text-white">{selectedCluster ? clusterEdges.length : graphData.stats.total_edges}</strong></div><div><span className="block text-[9px] text-slate-500">SUSPICIOUS FLOW</span><strong className="text-sm text-rose-300">{formatMoney((selectedCluster ? suspiciousClusterEdges : graphData.edges.filter(edge => edge.data.is_suspicious)).reduce((sum, edge) => sum + edge.data.amount, 0))}</strong></div></div>{highestRisk && <div className="mt-3 border-t border-slate-800 pt-2 text-[10px] font-mono text-slate-500">HIGHEST RISK ACCOUNT <span className="text-slate-200">{highestRisk.data.id}</span></div>}</div>}{selectedNode && <aside className="absolute right-4 top-4 bottom-4 flex w-[min(21rem,calc(100%-2rem))] flex-col overflow-y-auto border border-slate-700/80 bg-[#0b111c]/96 p-4 shadow-2xl backdrop-blur-md animate-slideLeft"><div className="flex items-start justify-between border-b border-slate-800 pb-3"><div><p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">Account investigation</p><h3 className="mt-1 text-base font-bold font-mono text-white">{selectedNode.label}</h3><p className="text-xs font-mono text-slate-400">{selectedNode.id}</p></div><button onClick={() => setSelectedNode(null)} className="p-1 text-slate-500 hover:text-white"><X className="h-4 w-4" /></button></div><div className="flex items-center justify-between py-3"><RiskBadge level={selectedNode.risk_score >= 80 ? 'CRITICAL' : selectedNode.risk_score >= 60 ? 'HIGH' : selectedNode.risk_score >= 30 ? 'MEDIUM' : 'LOW'} score={selectedNode.risk_score} size="sm" /><span className="border border-slate-700 bg-slate-900 px-2 py-1 text-[10px] font-mono uppercase text-slate-300">{nodeRole(selectedNode)}</span></div><div className="space-y-2 font-mono text-xs">{[['Account number', selectedNode.account_number], ['Connected accounts', `${selectedNode.connections || 0}`], ['Suspicious transactions', `${connectedSuspicious}`], ['Money received', formatMoney(selectedNode.total_in)], ['Money forwarded', formatMoney(selectedNode.total_out)]].map(([label, value]) => <div key={label} className="flex items-center justify-between border border-slate-800 bg-slate-900/70 p-2.5"><span className="text-slate-500">{label}</span><strong className="text-slate-100">{value}</strong></div>)}</div><div className="mt-3 border border-slate-800 bg-slate-950/70 p-3 text-[11px] leading-relaxed text-slate-400"><div className="mb-1 flex items-center gap-1.5 font-bold text-slate-300"><TriangleAlert className="h-3.5 w-3.5 text-amber-400" />Why flagged</div><p>{selectedNode.is_mule ? 'Mule account classification and suspicious network participation.' : selectedNode.risk_score >= 60 ? 'High account risk score and suspicious connected transfers.' : 'No high-risk account signal is present in the available graph data.'}</p></div><button onClick={focusSelected} className="mt-auto flex items-center justify-center gap-2 border border-cyan-800/70 bg-cyan-950/60 px-3 py-2 text-xs font-mono font-semibold text-cyan-300 hover:bg-cyan-900/70"><Crosshair className="h-3.5 w-3.5" />{focusedPath ? 'Focused neighborhood' : 'Focus money-flow path'}</button></aside>}{!loading && graphData && graphData.nodes.length === 0 && <div className="absolute inset-0 flex items-center justify-center font-mono text-sm text-slate-500">No network data returned.</div>}<div className="absolute bottom-4 left-4 flex items-center gap-2 text-[10px] font-mono text-slate-500"><ArrowRight className="h-3.5 w-3.5 text-cyan-500" />Arrows show transfer direction · labels show transaction amount{graphData?.stats?.suspicious_clusters_detected ? ` · ${graphData.stats.suspicious_clusters_detected} suspicious cluster(s)` : ''}</div></div>
     </div>
   );
 }

@@ -28,6 +28,7 @@ eval_res = RiskEngine.evaluate(
 )
 print(f"Risk evaluation for ₹48,000 to mule: Score={eval_res.score}, Level={eval_res.level.value}")
 assert eval_res.score >= 80, f"Expected critical score, got {eval_res.score}"
+assert eval_res.level == RiskLevel.CRITICAL, f"Expected CRITICAL level, got {eval_res.level.value}"
 assert eval_res.is_new_beneficiary is True
 assert eval_res.is_new_device is True
 
@@ -42,7 +43,8 @@ print("Mule chain 1:", net['mule_chains'][0])
 # 4. Test Attack Simulator
 sim_res = AttackSimulator.trigger("suspicious")
 print(f"Simulator 'suspicious': {sim_res.title}, Score: {sim_res.transaction.risk_assessment.score}")
-assert sim_res.transaction.risk_assessment.score == 92, "Expected exact 92 score for suspicious scenario"
+assert sim_res.transaction.risk_assessment.level == RiskLevel.CRITICAL
+assert sim_res.transaction.risk_assessment.score >= 80
 
 ring_res = AttackSimulator.trigger("fraud_ring")
 print(f"Simulator 'fraud_ring': {ring_res.title}, Chain: {ring_res.mule_chain}")

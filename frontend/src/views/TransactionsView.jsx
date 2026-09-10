@@ -18,7 +18,7 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [riskFilter, setRiskFilter] = useState('ALL');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [queue, setQueue] = useState('review');
 
   const loadTransactions = async () => {
     setLoading(true);
@@ -26,7 +26,7 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
       const data = await fetchTransactions({
         search,
         risk_level: riskFilter,
-        status: statusFilter,
+        status: 'ALL',
         limit: 100
       });
       setTransactions(data);
@@ -39,7 +39,14 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
 
   useEffect(() => {
     loadTransactions();
-  }, [search, riskFilter, statusFilter, refreshKey]);
+  }, [search, riskFilter, refreshKey]);
+
+  const queueDefinitions = {
+    review: { label: 'Needs Review', statuses: ['PROCESSED', 'FLAGGED', 'VERIFICATION_REQUIRED'] },
+    approved: { label: 'Approved', statuses: ['APPROVED'] },
+    paused: { label: 'Paused / Blocked', statuses: ['PAUSED', 'BLOCKED'] }
+  };
+  const visibleTransactions = transactions.filter((tx) => queueDefinitions[queue].statuses.includes((tx.status || 'PROCESSED').toUpperCase()));
 
   const getStatusBadge = (status) => {
     const s = (status || 'PROCESSED').toUpperCase();
@@ -68,7 +75,7 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
               TRANSACTION AUDIT STREAM
             </h2>
             <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-              {transactions.length} RECORDS
+              {visibleTransactions.length} RECORDS
             </span>
           </div>
           <p className="text-xs text-slate-400">
@@ -113,26 +120,26 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
               <option value="HIGH">HIGH (60-79)</option>
               <option value="MEDIUM">MEDIUM (30-59)</option>
               <option value="LOW">LOW (0-29)</option>
+              <option value="FRAUD_LABELED">FRAUD-LABELED (source data)</option>
             </select>
           </div>
 
-          {/* Status Filter */}
-          <div className="flex items-center gap-1.5 text-xs font-mono">
-            <span className="text-slate-400">Status:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-slate-900 border border-slate-800 text-slate-200 text-xs font-mono rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="ALL">ALL STATUSES</option>
-              <option value="PROCESSED">PROCESSED</option>
-              <option value="PAUSED">PAUSED</option>
-              <option value="FLAGGED">FLAGGED</option>
-              <option value="BLOCKED">BLOCKED</option>
-              <option value="APPROVED">APPROVED</option>
-            </select>
-          </div>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {Object.entries(queueDefinitions).map(([key, definition]) => {
+          const count = transactions.filter((tx) => definition.statuses.includes((tx.status || 'PROCESSED').toUpperCase())).length;
+          return (
+            <button
+              key={key}
+              onClick={() => setQueue(key)}
+              className={`px-3 py-2 rounded-lg border text-xs font-mono transition ${queue === key ? 'border-cyan-500/60 bg-cyan-950/60 text-cyan-300' : 'border-slate-800 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+            >
+              {definition.label} <span className="ml-1 text-[10px] opacity-70">{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Transactions Table */}
@@ -162,17 +169,18 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
                     </div>
                   </td>
                 </tr>
-              ) : transactions.length === 0 ? (
+              ) : visibleTransactions.length === 0 ? (
                 <tr>
                   <td colSpan="9" className="p-8 text-center text-slate-500">
                     No transactions match current filters.
                   </td>
                 </tr>
               ) : (
-                transactions.map((tx) => {
-                  const score = tx.risk_assessment?.score ?? 15;
+                visibleTransactions.map((tx) => {
+                  const score = tx.risk_assessment?.score ?? null;
+                  const isDatasetFraudLabel = tx.is_flagged && !tx.risk_assessment;
                   const level = tx.risk_assessment?.level ?? 'LOW';
-                  const isSuspicious = score >= 60 || tx.is_flagged;
+                  const isSuspicious = level === 'HIGH' || level === 'CRITICAL' || tx.is_flagged;
 
                   return (
                     <tr
@@ -204,7 +212,7 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
                       </td>
 
                       <td className="p-3.5 text-right font-bold text-white font-mono">
-                        <span className={score >= 60 ? 'text-rose-400' : 'text-slate-200'}>
+                        <span className={isSuspicious ? 'text-rose-400' : 'text-slate-200'}>
                           ₹{tx.amount.toLocaleString('en-IN')}
                         </span>
                       </td>
@@ -218,7 +226,13 @@ export default function TransactionsView({ onInspectTransaction, refreshKey }) {
                       </td>
 
                       <td className="p-3.5 text-center">
-                        <RiskBadge level={level} score={score} size="xs" />
+                        {isDatasetFraudLabel ? (
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-slate-600 bg-slate-800 text-slate-300">
+                            FRAUD-LABELED
+                          </span>
+                        ) : (
+                          <RiskBadge level={level} score={score} size="xs" />
+                        )}
                       </td>
 
                       <td className="p-3.5 text-center">

@@ -1,11 +1,35 @@
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import List, Optional, Tuple
+
 from .models import RiskAssessment, RiskLevel, RiskFactor, Account
+
 
 class RiskEngine:
     """
-    FinShield Behavioral Risk Engine (Prototype Rule-Based Scoring).
-    Calculates explainable risk scores based on fintech behavioral signals.
+    FinShield Behavioral Risk Engine.
+
+    Explainable rule-based scoring for the prototype.
+
+    The engine intentionally does NOT use the dataset's IS_FRAUD label
+    as an input to the prediction score. That label is ground truth
+    and should only be used for evaluation/validation.
+
+    Signals:
+        New Beneficiary       +20
+        New Device            +15
+        Unusual Amount        +25
+        Unusual Timing        +10
+        High Velocity         +15
+        Suspicious Network    +30
+
+    Maximum raw score = 115.
+    Final score is capped at 100.
+
+    Risk tiers:
+        0-29   LOW
+        30-59  MEDIUM
+        60-79  HIGH
+        80-100 CRITICAL
     """
 
     SCORING_WEIGHTS = {
@@ -18,142 +42,412 @@ class RiskEngine:
     }
 
     @classmethod
+    def classify_score(
+        cls,
+        score: float
+    ) -> Tuple[int, RiskLevel, str]:
+        """
+        Normalize score, clamp to 0-100, then classify it.
+
+        The risk level is ALWAYS derived from the final normalized score.
+        """
+
+        try:
+            normalized_score = int(round(float(score)))
+        except (TypeError, ValueError):
+            normalized_score = 0
+
+        normalized_score = max(
+            0,
+            min(100, normalized_score)
+        )
+
+        if normalized_score <= 29:
+            return (
+                normalized_score,
+                RiskLevel.LOW,
+                "PROCEED - Transaction within normal risk parameters."
+            )
+
+        if normalized_score <= 59:
+            return (
+                normalized_score,
+                RiskLevel.MEDIUM,
+                "FLAG FOR MONITORING - Elevated risk markers detected. Queue for soft review."
+            )
+
+        if normalized_score <= 79:
+            return (
+                normalized_score,
+                RiskLevel.HIGH,
+                "PAUSE & STEP-UP VERIFICATION - Require instant biometric or out-of-band OTP challenge."
+            )
+
+        return (
+            normalized_score,
+            RiskLevel.CRITICAL,
+            "IMMEDIATE INTERVENTION - Block transaction and freeze downstream transfer route."
+        )
+
+    @staticmethod
+    def _parse_hour(timestamp_str: Optional[str]) -> int:
+        """
+        Extract hour from several supported timestamp formats.
+
+        Supported:
+            HH:MM:SS
+            YYYY-MM-DD HH:MM:SS
+            YYYY-MM-DDTHH:MM:SS
+            ISO timestamps with timezone
+
+        If parsing fails, use 14:00 as a neutral daytime default.
+        """
+
+        default_hour = 14
+
+        if not timestamp_str:
+            return default_hour
+
+        value = str(timestamp_str).strip()
+
+        if not value:
+            return default_hour
+
+        try:
+            # Plain time string: 02:30:00
+            if ":" in value and "T" not in value and " " not in value:
+                return int(value.split(":")[0])
+
+            # ISO / datetime string
+            if "T" in value or " " in value:
+                normalized = value.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(normalized)
+                return dt.hour
+
+        except (ValueError, TypeError, OverflowError):
+            return default_hour
+
+        return default_hour
+
+    @classmethod
     def evaluate(
         cls,
         sender: Account,
         receiver: Account,
         amount: float,
-        device: str,
+        device: Optional[str],
         timestamp_str: Optional[str] = None,
         recent_tx_count: int = 0,
-        receiver_network_risk: bool = False
+        receiver_network_risk: bool = False,
+        amount_history_available: bool = True
     ) -> RiskAssessment:
+        """
+        Evaluate a transaction using explainable behavioral/network signals.
+        """
+
         score = 0
+
         reasons: List[str] = []
         factors: List[RiskFactor] = []
 
-        # 1. New Beneficiary (+20)
-        is_new_beneficiary = receiver.id not in sender.known_beneficiaries
+        # ---------------------------------------------------------
+        # Normalize inputs
+        # ---------------------------------------------------------
+
+        try:
+            amount = float(amount)
+        except (TypeError, ValueError):
+            amount = 0.0
+
+        try:
+            recent_tx_count = int(recent_tx_count)
+        except (TypeError, ValueError):
+            recent_tx_count = 0
+
+        recent_tx_count = max(0, recent_tx_count)
+
+        # ---------------------------------------------------------
+        # 1. NEW BENEFICIARY +20
+        # ---------------------------------------------------------
+
+        known_beneficiaries = sender.known_beneficiaries or []
+
+        is_new_beneficiary = (
+            receiver.id not in known_beneficiaries
+        )
+
         if is_new_beneficiary:
             pts = cls.SCORING_WEIGHTS["new_beneficiary"]
-            score += pts
-            reasons.append("New beneficiary not previously transferred to")
-            factors.append(RiskFactor(
-                name="New Beneficiary",
-                score_impact=pts,
-                description=f"Receiver {receiver.name} ({receiver.account_number}) is not in sender's trusted list."
-            ))
 
-        # 2. New Device (+15)
-        is_new_device = device not in sender.known_devices
+            score += pts
+
+            reasons.append(
+                "New beneficiary not previously transferred to"
+            )
+
+            factors.append(
+                RiskFactor(
+                    name="New Beneficiary",
+                    score_impact=pts,
+                    description=(
+                        f"Receiver {receiver.name} "
+                        f"({receiver.account_number}) is not in "
+                        f"sender's trusted beneficiary history."
+                    )
+                )
+            )
+
+        # ---------------------------------------------------------
+        # 2. NEW DEVICE +15
+        # ---------------------------------------------------------
+
+        known_devices = sender.known_devices or []
+
+        is_new_device = (
+            bool(device)
+            and str(device) not in known_devices
+        )
+
         if is_new_device:
             pts = cls.SCORING_WEIGHTS["new_device"]
-            score += pts
-            reasons.append("Unrecognized device fingerprint")
-            factors.append(RiskFactor(
-                name="New Device",
-                score_impact=pts,
-                description=f"Transaction originated from '{device}', which has never been registered by this account."
-            ))
 
-        # 3. Unusual Amount (+25)
-        avg_amt = sender.avg_transaction_amount or 5000.0
-        is_unusual_amount = amount >= (2.5 * avg_amt) or (amount >= 30000.0 and avg_amt <= 8000.0)
+            score += pts
+
+            reasons.append(
+                "Unrecognized device fingerprint"
+            )
+
+            factors.append(
+                RiskFactor(
+                    name="New Device",
+                    score_impact=pts,
+                    description=(
+                        f"Transaction originated from '{device}', "
+                        "which is not present in the account's "
+                        "known device history."
+                    )
+                )
+            )
+
+        # ---------------------------------------------------------
+        # 3. UNUSUAL AMOUNT +25
+        # ---------------------------------------------------------
+
+        try:
+            avg_amt = float(
+                sender.avg_transaction_amount or 0.0
+            )
+        except (TypeError, ValueError):
+            avg_amt = 0.0
+
+        is_unusual_amount = False
+
+        if amount_history_available and avg_amt > 0:
+
+            ratio = amount / avg_amt
+
+            # Strong relative anomaly
+            if ratio >= 2.5:
+                is_unusual_amount = True
+
+            # Strong absolute anomaly for low-value accounts
+            elif amount >= 30000.0 and avg_amt <= 8000.0:
+                is_unusual_amount = True
+
         if is_unusual_amount:
+
             pts = cls.SCORING_WEIGHTS["unusual_amount"]
-            score += pts
-            ratio = amount / avg_amt if avg_amt > 0 else 1.0
-            reasons.append(f"Unusual transaction amount ({ratio:.1f}x higher than historical baseline)")
-            factors.append(RiskFactor(
-                name="Unusual Amount",
-                score_impact=pts,
-                description=f"Attempted amount ₹{amount:,.2f} is significantly above average baseline of ₹{avg_amt:,.2f}."
-            ))
 
-        # 4. Unusual Timing (+10)
-        is_unusual_timing = False
-        hour = 14 # default
-        if timestamp_str:
-            try:
-                # Handle ISO timestamps or time strings
-                if "T" in timestamp_str:
-                    dt = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-                    hour = dt.hour
-                elif ":" in timestamp_str:
-                    hour = int(timestamp_str.split(":")[0])
-            except Exception:
-                hour = 14
-        
-        # Late night anomaly between 01:00 and 05:00
-        if 1 <= hour <= 5:
-            is_unusual_timing = True
-            pts = cls.SCORING_WEIGHTS["unusual_timing"]
             score += pts
-            reasons.append(f"High-risk transfer window (executed at {hour:02d}:00 off-peak hours)")
-            factors.append(RiskFactor(
-                name="Unusual Timing",
-                score_impact=pts,
-                description=f"Executed during dormitive off-peak hours ({hour:02d}:00 hrs), standard indicator of unauthorized drainage."
-            ))
 
-        # 5. High Transaction Velocity (+15)
-        if recent_tx_count >= 2:
-            pts = cls.SCORING_WEIGHTS["high_velocity"]
-            score += pts
-            reasons.append(f"Rapid burst velocity ({recent_tx_count} transfers in past 10 minutes)")
-            factors.append(RiskFactor(
-                name="High Velocity",
-                score_impact=pts,
-                description=f"Multiple rapid consecutive transfers ({recent_tx_count}) observed within short timeframe."
-            ))
+            ratio = (
+                amount / avg_amt
+                if avg_amt > 0
+                else 1.0
+            )
 
-        # 6. Suspicious Network Connection (+30)
-        is_suspicious_conn = (
-            receiver_network_risk or
-            receiver.type in ["SUSPECTED_MULE", "CONFIRMED_MULE", "CASHOUT_POINT"] or
-            receiver.risk_score >= 65
+            reasons.append(
+                f"Unusual transaction amount "
+                f"({ratio:.1f}x higher than historical baseline)"
+            )
+
+            factors.append(
+                RiskFactor(
+                    name="Unusual Amount",
+                    score_impact=pts,
+                    description=(
+                        f"Attempted amount ₹{amount:,.2f} "
+                        f"is significantly above the historical "
+                        f"baseline of ₹{avg_amt:,.2f}."
+                    )
+                )
+            )
+
+        # ---------------------------------------------------------
+        # 4. UNUSUAL TIMING +10
+        # ---------------------------------------------------------
+
+        hour = cls._parse_hour(timestamp_str)
+
+        is_unusual_timing = (
+            1 <= hour <= 5
         )
-        if is_suspicious_conn:
-            pts = cls.SCORING_WEIGHTS["suspicious_network"]
+
+        if is_unusual_timing:
+
+            pts = cls.SCORING_WEIGHTS["unusual_timing"]
+
             score += pts
-            reasons.append(f"Direct connection to flagged mule/high-risk entity ({receiver.name})")
-            factors.append(RiskFactor(
-                name="Suspicious Network Connection",
-                score_impact=pts,
-                description=f"Beneficiary account exhibits prior links to mule network or high risk cluster."
-            ))
 
-        # Cap score at 100
-        final_score = min(score, 100)
+            reasons.append(
+                f"High-risk transfer window "
+                f"(executed at {hour:02d}:00 off-peak hours)"
+            )
 
-        # Categorize risk level
-        if final_score <= 29:
-            level = RiskLevel.LOW
-            recommended_action = "PROCEED - Transaction within normal risk parameters."
-        elif final_score <= 59:
-            level = RiskLevel.MEDIUM
-            recommended_action = "FLAG FOR MONITORING - Elevated risk markers detected. Queue for soft review."
-        elif final_score <= 79:
-            level = RiskLevel.HIGH
-            recommended_action = "PAUSE & STEP-UP VERIFICATION - Require instant biometric or out-of-band OTP challenge."
-        else:
-            level = RiskLevel.CRITICAL
-            recommended_action = "IMMEDIATE INTERVENTION - Block transaction and freeze downstream transfer route."
+            factors.append(
+                RiskFactor(
+                    name="Unusual Timing",
+                    score_impact=pts,
+                    description=(
+                        f"Transaction occurred at approximately "
+                        f"{hour:02d}:00 during the configured "
+                        "off-peak monitoring window."
+                    )
+                )
+            )
 
-        # Human-readable AI narrative synthesis
+        # ---------------------------------------------------------
+        # 5. HIGH VELOCITY +15
+        # ---------------------------------------------------------
+
+        if recent_tx_count >= 2:
+
+            pts = cls.SCORING_WEIGHTS["high_velocity"]
+
+            score += pts
+
+            reasons.append(
+                f"Rapid burst velocity "
+                f"({recent_tx_count} transfers in past 10 minutes)"
+            )
+
+            factors.append(
+                RiskFactor(
+                    name="High Velocity",
+                    score_impact=pts,
+                    description=(
+                        f"{recent_tx_count} outgoing transfers "
+                        "were observed within the configured "
+                        "10-minute window."
+                    )
+                )
+            )
+
+        # ---------------------------------------------------------
+        # 6. SUSPICIOUS NETWORK +30
+        # ---------------------------------------------------------
+
+        receiver_type = str(
+            receiver.type or ""
+        ).upper()
+
+        try:
+            receiver_risk_score = float(
+                receiver.risk_score or 0
+            )
+        except (TypeError, ValueError):
+            receiver_risk_score = 0.0
+
+        is_suspicious_conn = (
+            bool(receiver_network_risk)
+            or receiver_type in {
+                "SUSPECTED_MULE",
+                "CONFIRMED_MULE",
+                "CASHOUT_POINT",
+            }
+            or receiver_risk_score >= 65
+        )
+
+        if is_suspicious_conn:
+
+            pts = cls.SCORING_WEIGHTS["suspicious_network"]
+
+            score += pts
+
+            reasons.append(
+                f"Direct connection to flagged "
+                f"mule/high-risk entity ({receiver.name})"
+            )
+
+            factors.append(
+                RiskFactor(
+                    name="Suspicious Network Connection",
+                    score_impact=pts,
+                    description=(
+                        "Beneficiary account is associated with "
+                        "a suspicious network, flagged account, "
+                        "or elevated network risk context."
+                    )
+                )
+            )
+
+        # ---------------------------------------------------------
+        # FINAL SCORE
+        # ---------------------------------------------------------
+
+        final_score, level, recommended_action = (
+            cls.classify_score(score)
+        )
+
+        # ---------------------------------------------------------
+        # EXPLAINABLE NARRATIVE
+        # ---------------------------------------------------------
+
         if reasons:
-            reasons_summary = ", ".join(reasons).lower()
-            narrative = (
-                f"This transaction has been scored at {final_score}/100 ({level.value}) by the prototype risk engine. "
-                f"Critical risk indicators were triggered because {reasons_summary}. "
-                f"Historical baseline comparison indicates average transfer of ₹{avg_amt:,.2f} versus current ₹{amount:,.2f}."
+
+            reasons_summary = ", ".join(
+                reasons
             )
+
+            if level == RiskLevel.CRITICAL:
+                severity_text = "Critical-risk indicators"
+            elif level == RiskLevel.HIGH:
+                severity_text = "High-risk indicators"
+            elif level == RiskLevel.MEDIUM:
+                severity_text = "Elevated-risk indicators"
+            else:
+                severity_text = "Low-risk indicators"
+
+            narrative = (
+                f"This transaction has been scored at "
+                f"{final_score}/100 ({level.value}) by the "
+                "FinShield prototype risk engine. "
+                f"{severity_text} detected: "
+                f"{reasons_summary}. "
+                f"Historical baseline comparison indicates "
+                f"an average transfer of ₹{avg_amt:,.2f} "
+                f"versus the current ₹{amount:,.2f}."
+            )
+
         else:
+
             narrative = (
-                f"Transaction scored at {final_score}/100 ({level.value}). "
-                f"Sender {sender.name} is transacting within regular historical baseline limits "
-                f"(₹{amount:,.2f} vs avg ₹{avg_amt:,.2f}) using trusted device '{device}'."
+                f"Transaction scored at "
+                f"{final_score}/100 ({level.value}). "
+                f"Sender {sender.name} is transacting within "
+                f"regular historical baseline limits "
+                f"(₹{amount:,.2f} vs average "
+                f"₹{avg_amt:,.2f})."
+                + (
+                    f" Device '{device}' is present."
+                    if device
+                    else " Device telemetry is unavailable."
+                )
             )
+
+        # ---------------------------------------------------------
+        # RETURN ASSESSMENT
+        # ---------------------------------------------------------
 
         return RiskAssessment(
             score=final_score,

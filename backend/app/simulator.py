@@ -11,7 +11,7 @@ class AttackSimulator:
     Simulates attack vectors and behavioral shifts for the FinShield Hackathon Demo.
     Scenarios:
     1. Normal Transaction (Benign baseline)
-    2. Suspicious Transaction (92/100 risk score, ₹48,000 anomaly)
+    2. Suspicious Transaction (rule-scored ₹48,000 anomaly)
     3. Account Takeover (Hardware change + credential rotation + rapid drain)
     4. Coordinated Fraud Ring (Multi-hop mule chain expanding the graph)
     """
@@ -64,7 +64,7 @@ class AttackSimulator:
             )
 
         elif scenario == "suspicious":
-            # Scenario 2: Suspicious Transaction (₹48,000, 92/100 risk score)
+            # Scenario 2: Suspicious Transaction (₹48,000 anomaly)
             sender = db.accounts["ACC-VIC-101"]  # Ananya (avg: ₹5,800)
             receiver = db.accounts["ACC-MULE-201"]  # Rohan Verma (Mule)
             amount = 48000.0
@@ -79,10 +79,6 @@ class AttackSimulator:
                 recent_tx_count=1,
                 receiver_network_risk=True
             )
-            # Ensure exact 92/100 score as required by demo spec
-            assessment.score = 92
-            assessment.level = RiskLevel.CRITICAL
-            assessment.recommended_action = "PAUSE & STEP-UP VERIFICATION - Require instant biometric or OTP challenge."
             assessment.ai_narrative = (
                 "This transaction was flagged because the amount (₹48,000) is significantly above normal behavior "
                 "(historical average: ₹5,800), the beneficiary 'Rohan Verma' is new, the device fingerprint is unfamiliar, "
@@ -127,7 +123,7 @@ class AttackSimulator:
             return SimulationResponse(
                 scenario="suspicious",
                 title="Suspicious Transaction Intercepted",
-                message="High-risk anomaly detected: ₹48,000 transfer intercepted with Risk Score 92/100 (CRITICAL).",
+                message=f"High-risk anomaly detected: ₹48,000 transfer intercepted with Risk Score {assessment.score}/100 ({assessment.level.value}).",
                 status="FLAGGED",
                 transaction=tx,
                 alert=alert,
@@ -151,9 +147,6 @@ class AttackSimulator:
                 recent_tx_count=3,
                 receiver_network_risk=True
             )
-            assessment.score = 98
-            assessment.level = RiskLevel.CRITICAL
-            assessment.recommended_action = "BLOCK & FREEZE - Account compromise signature detected."
             assessment.ai_narrative = (
                 "ACCOUNT TAKEOVER CONFIRMED: Foreign IP/device signature accessed account during off-hours, "
                 "attempting an unprecedented ₹95,000 capital drain (11.6x average) to high-risk mule node."
@@ -181,7 +174,7 @@ class AttackSimulator:
                 id=alert_id,
                 timestamp=now_str,
                 risk_level=RiskLevel.CRITICAL,
-                risk_score=98,
+                risk_score=assessment.score,
                 title="High-Confidence Account Takeover (ATO) In Progress",
                 transaction_id=tx.id,
                 account_id=sender.id,
@@ -281,7 +274,7 @@ class AttackSimulator:
                 id=f"ALT-RING-{str(uuid.uuid4())[:5].upper()}",
                 timestamp=now_str,
                 risk_level=RiskLevel.CRITICAL,
-                risk_score=99,
+                risk_score=max(tx_ring_1.risk_assessment.score, tx_ring_2.risk_assessment.score, tx_ring_3.risk_assessment.score, tx_ring_4.risk_assessment.score),
                 title="COORDINATED FRAUD PATTERN DETECTED",
                 transaction_id=tx_ring_4.id,
                 account_id=victim.id,
